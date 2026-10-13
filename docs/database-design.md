@@ -78,18 +78,40 @@ its type, its name, and optionally a key marker.
 | `UK` | **Unique key**: no two rows can share this value (e.g. two customers can't have the same email) |
 | `PK, FK` | Both at once. In `order_items`, `order_id` + `product_id` together form the primary key, and each also points to another table |
 
-The lines between boxes use **crow's foot notation**. Each end of a line shows
-how many rows can sit on that side of the relationship:
+The lines between boxes use **crow's foot notation**. The symbol at each end of
+a line shows how many rows of the table **it touches** can be involved:
 
-| Symbol | Meaning |
+![Crow's foot key: two bars mean exactly one; a circle and crow's foot mean zero or more; a bar and crow's foot mean one or more](images/crows-foot-key.svg)
+
+The symbols are made of two parts. Read the part nearest the table as the
+**maximum** and the part further out as the **minimum**:
+
+| Part | Means |
 |---|---|
-| `\|\|` | exactly one |
-| `o{` | zero or more |
-| `\|{` | one or more |
+| Bar | one |
+| Circle | zero (optional) |
+| Crow's foot (three-pronged fork) | many |
 
-So `CUSTOMERS ||--o{ ORDERS : "places"` reads as: *each order belongs to exactly
-one customer, and a customer places zero or more orders.* And
-`ORDERS ||--|{ ORDER_ITEMS` means every order must contain at least one item.
+So bar + bar = "minimum one, maximum one" = **exactly one**, and circle + crow's
+foot = "minimum zero, maximum many" = **zero or more**.
+
+**Example:** on the line between CUSTOMERS and ORDERS, the two bars touch
+CUSTOMERS and the circle + crow's foot touches ORDERS. Read it from each side:
+- One customer places **zero or more** orders (the symbol at the ORDERS end)
+- Each order belongs to **exactly one** customer (the symbol at the CUSTOMERS end)
+
+Similarly, the bar + crow's foot touching ORDER_ITEMS means every order must
+contain **at least one** item.
+
+| Drawn symbol | Mermaid code | Meaning |
+|---|---|---|
+| Two bars | `\|\|` | Exactly one |
+| Circle + crow's foot | `o{` (or `}o` on the left side) | Zero or more |
+| Bar + crow's foot | `\|{` (or `}\|` on the left side) | One or more |
+
+The Mermaid code column is only needed when editing the diagram's source. For
+example, `CUSTOMERS ||--o{ ORDERS` puts two bars at the CUSTOMERS end and a
+circle + crow's foot at the ORDERS end.
 
 ## Relationships
 
