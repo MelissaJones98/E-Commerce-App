@@ -2,6 +2,9 @@
 import express from 'express';
 import bcrypt from 'bcrypt';
 import { query } from '../db/index.js';
+import passport from '../config/passport.js';
+import { requireAuth } from '../middleware/require-auth.js';
+import { normalizeEmail } from '../utils/normalize-email.js';
 
 const router = express.Router();
 
@@ -52,9 +55,7 @@ router.post('/register', async (req, res) => {
 
   const { first_name, last_name, password } = req.body;
 
-  // Store emails in one standard form, so "Ada@Example.com " and
-  // "ada@example.com" count as the same account.
-  const email = req.body.email.trim().toLowerCase();
+  const email = normalizeEmail(req.body.email);
 
   // Never store the password itself, only a one-way hash of it.
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
@@ -76,6 +77,39 @@ router.post('/register', async (req, res) => {
     }
     throw err;
   }
+});
+
+// POST /auth/login: log in with email and password.
+router.post('/login', (req, res, next) => {
+  const { email, password } = req.body ?? {};
+  if (!isNonEmptyString(email) || !isNonEmptyString(password)) {
+    return res.status(400).json({ error: 'email and password are required' });
+  }
+
+  // Run the local strategy from config/passport.js. Passing a callback lets
+  // us send JSON responses instead of Passport's default redirects.
+  passport.authenticate('local', (err, customer) => {
+    if (err) return next(err);
+    if (!customer) {
+      return res.status(401).json({ error: 'Incorrect email or password' });
+    }
+
+    // req.login() stores the customer in the session. Passport also gives
+    // the session a new ID at this point, so an ID an attacker planted in
+    // the browser before login is useless afterwards ("session fixation").
+    req.login(customer, (err) => {
+      if (err) return next(err);
+      res.json(customer);
+    });
+  })(req, res, next);
+});
+
+// POST /auth/logout: end the logged-in customer's session.
+router.post('/logout', requireAuth, (req, res, next) => {
+  req.logout((err) => {
+    if (err) return next(err);
+    res.sendStatus(204);
+  });
 });
 
 export default router;

@@ -3,7 +3,15 @@
 import express from 'express';
 // Import the query helper that runs SQL against the PostgreSQL database.
 import { query } from './db/index.js';
+import session from 'express-session';
+import passport from './config/passport.js';
 import authRouter from './routes/auth.js';
+
+// The session secret signs the session cookie so it can't be forged.
+// Fail immediately with a clear message rather than running insecurely.
+if (!process.env.SESSION_SECRET) {
+  throw new Error('SESSION_SECRET is not set. Add it to back-end/.env');
+}
 
 // Create the application object. Routes and middleware are attached to it.
 // The server is started in server.js, so tests can import the app without
@@ -12,6 +20,26 @@ const app = express();
 
 // Parse JSON request bodies so routes can read them from req.body.
 app.use(express.json());
+
+// Sessions: give each visitor a cookie with a random session ID, and keep
+// their session data (e.g. who is logged in) on the server under that ID.
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET,
+    // Don't re-save sessions that haven't changed.
+    resave: false,
+    // Don't create a session (or send a cookie) until something is stored in
+    // it, i.e. until someone logs in.
+    saveUninitialized: false,
+    // HttpOnly: browser JavaScript can't read the cookie, so a malicious
+    // script injected into a page can't steal it.
+    cookie: { httpOnly: true },
+  })
+);
+
+// Passport reads the logged-in customer from the session on each request
+// and makes it available as req.user.
+app.use(passport.session());
 
 // All routes in routes/auth.js are reached under /auth, e.g. /auth/register.
 app.use('/auth', authRouter);
