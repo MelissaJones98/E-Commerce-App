@@ -21,8 +21,8 @@ browsing products, and completing a purchase.
 - Deploy the application using Render
 
 ## Database
-The database has five tables: `customers`, `addresses`, `products`, `orders`, and `order_items`
-(a join table linking orders to the products they contain).
+The database has six tables: `customers`, `addresses`, `categories`, `products`, `orders`, and
+`order_items` (a join table linking orders to the products they contain).
 
 The full design, including the Entity Relationship Diagram, column types, relationships, and the
 reasoning behind each design decision, is in [docs/database-design.md](docs/database-design.md).
@@ -34,27 +34,33 @@ e-commerce-app/
 │   ├── app.js              # Express app: middleware, routes and error handling
 │   ├── server.js           # Starts the server (entry point for npm start / npm run dev)
 │   ├── routes/
-│   │   └── auth.js         # /auth routes (register, login, logout)
+│   │   ├── auth.js         # /auth routes (register, login, logout)
+│   │   └── products.js     # /products routes (browse, create, update, retire)
 │   ├── config/
 │   │   └── passport.js     # Passport.js setup: checks logins, remembers who's logged in
 │   ├── middleware/
 │   │   └── require-auth.js # Blocks routes from customers who aren't logged in (401)
 │   ├── utils/
-│   │   └── normalize-email.js # Trims and lower-cases emails (shared by register and login)
+│   │   ├── normalize-email.js # Trims and lower-cases emails (shared by register and login)
+│   │   └── parse-id.js     # Checks an id from a URL is a valid whole number
 │   ├── db/
 │   │   ├── index.js        # PostgreSQL connection pool and query helper
-│   │   ├── schema.sql      # Creates the database tables
+│   │   ├── schema.sql      # Creates the database tables (for a new database)
+│   │   ├── migrations/     # Updates an existing database to match schema.sql
+│   │   │   └── 001-add-categories.sql
 │   │   └── reset-test-db.js # Rebuilds the test database from schema.sql
 │   ├── tests/
 │   │   ├── auth.register.test.js # Tests for POST /auth/register
 │   │   ├── auth.login.test.js    # Tests for POST /auth/login and /auth/logout
-│   │   └── helpers.js      # Shared test helpers (e.g. emptying tables between tests)
+│   │   ├── products.test.js      # Tests for the /products routes
+│   │   └── helpers.js      # Shared test helpers (e.g. emptying tables, logging in, adding test data)
 │   ├── .env                # Your local settings (not committed, see below)
 │   ├── .env.test           # Test settings: test database name and a test-only session secret
 │   └── package.json
 └── docs/
     ├── database-design.md  # Database design and ERD
-    └── api-endpoints.md    # Planned REST API endpoints
+    ├── api-endpoints.md    # REST API endpoints: built and planned
+    └── images/             # Images used in the docs (e.g. the ERD key)
 ```
 
 ## How to Use
@@ -75,13 +81,26 @@ Using **pgAdmin 4**:
 1. Right-click **Databases → Create → Database…**, name it `ecommerce`, and click **Save**.
 2. Select the `ecommerce` database, open **Tools → Query Tool**, and check the tab title starts with `ecommerce/`.
 3. Open `back-end/db/schema.sql`, then click **Execute** (or press F5).
-4. Refresh the database: `customers`, `addresses`, `products`, `orders`, and `order_items` appear under **Schemas → public → Tables**.
+4. Refresh the database: `addresses`, `categories`, `customers`, `order_items`, `orders`, and `products` appear under **Schemas → public → Tables**.
 
 Or using **psql** from the project root:
 ```bash
 createdb -U postgres ecommerce
 psql -U postgres -d ecommerce -f back-end/db/schema.sql
 ```
+
+#### Updating an existing database
+`schema.sql` always describes the latest database, so a new database built from it needs nothing
+else. If you created your database **before** a schema change, run each file in
+`back-end/db/migrations/` that you haven't run yet, in number order, the same way as `schema.sql`
+above (pgAdmin Query Tool → open file → Execute):
+
+| Migration | What it changes |
+|---|---|
+| `001-add-categories.sql` | Adds the `categories` table and `products.category_id` |
+
+Each migration runs once. Running one again fails with an error (e.g. "relation already exists")
+and changes nothing, because each runs inside a transaction.
 
 ### 3. Configure environment variables
 Create a file called `.env` in the `back-end` folder:
@@ -118,6 +137,11 @@ npm start      # runs without auto-restart
 | `POST /auth/register` | Creates a customer account (see below) |
 | `POST /auth/login` | Logs in with email and password (see below) |
 | `POST /auth/logout` | Logs out (must be logged in) |
+| `GET /products` | Lists products; add `?category=1` to filter by category |
+| `GET /products/:productId` | Gets one product |
+| `POST /products` | Creates a product (must be logged in) |
+| `PUT /products/:productId` | Replaces a product's details (must be logged in) |
+| `DELETE /products/:productId` | Retires a product (must be logged in) |
 
 Visit http://localhost:3000/health in your browser to test it.
 
@@ -168,6 +192,71 @@ Send a **POST** request to `http://localhost:3000/auth/logout` with no body.
 Sessions are currently stored in the server's memory, so restarting the server (including
 `npm run dev` restarting after you save a file) logs everyone out.
 
+#### Browse products
+These routes are public; no login needed. Try them in Postman or your browser:
+- `GET http://localhost:3000/products` lists every product in the shop
+- `GET http://localhost:3000/products?category=1` lists only products in category `1`
+- `GET http://localhost:3000/products/1` gets product `1`
+
+```json
+{
+  "id": 1,
+  "category_id": 1,
+  "sku": "MUG-001",
+  "name": "Coffee Mug",
+  "description": "A 350ml ceramic mug",
+  "price": "8.50",
+  "stock_quantity": 42
+}
+```
+`price` comes back as a string (`"8.50"`) so its exact value is kept; converting to a JavaScript
+number could introduce rounding errors.
+
+| Response | When |
+|---|---|
+| `200 OK` | Success. A category with no products returns an empty list `[]` |
+| `400 Bad Request` | The category or product id isn't a whole number |
+| `404 Not Found` | No product with that id, or it has been retired |
+
+There are no category routes yet, so add categories in pgAdmin's Query Tool:
+```sql
+INSERT INTO categories (name) VALUES ('Kitchen') RETURNING id;
+```
+
+#### Create, update and retire products
+Log in first (see above). Then:
+
+- **Create:** send a **POST** to `http://localhost:3000/products`.
+- **Update:** send a **PUT** to `http://localhost:3000/products/1`. `PUT` replaces the whole
+  product, so send every field, not only the ones that changed.
+
+Both take **Body → raw → JSON**:
+```json
+{
+  "sku": "MUG-001",
+  "name": "Coffee Mug",
+  "description": "A 350ml ceramic mug",
+  "price": 8.5,
+  "stock_quantity": 42,
+  "category_id": 1
+}
+```
+`description` and `category_id` are optional. `price` must be a number (not a string) with at most
+2 decimal places.
+
+**Retire:** send a **DELETE** to `http://localhost:3000/products/1`. The product disappears from
+the shop but stays in the database, so past orders can still refer to it.
+
+| Response | When |
+|---|---|
+| `201 Created` | Product created (POST). Returns the new product |
+| `200 OK` | Product updated (PUT). Returns the updated product |
+| `204 No Content` | Product retired (DELETE) |
+| `400 Bad Request` | A field is missing or invalid, or `category_id` doesn't match a category |
+| `401 Unauthorized` | You aren't logged in |
+| `404 Not Found` | No product with that id, or it has already been retired |
+| `409 Conflict` | Another product already has that `sku` |
+
 ### 6. Run the tests
 The tests use a separate `ecommerce_test` database, so they never touch your real data.
 `.env.test` switches the database name and provides a test-only `SESSION_SECRET`; all other
@@ -178,7 +267,8 @@ Create the test database once, from the `back-end` folder:
 npm run db:test:reset
 ```
 This drops `ecommerce_test` if it exists, recreates it, and runs `schema.sql`. Run it again
-whenever you change `schema.sql`, so the test database stays in sync.
+whenever `schema.sql` changes (e.g. after pulling a new migration), so the test database stays in
+sync. The test database never needs migrations; it's rebuilt from scratch instead.
 
 Then run the tests:
 ```bash
@@ -206,6 +296,9 @@ HTTP status code that describes the type of error.
 Implemented error handling for:
 - Invalid registration details (`400`)
 - Duplicate accounts (`409`)
+- Invalid product details or ids (`400`)
+- Products not found (`404`)
+- Duplicate product SKUs (`409`)
 - Failed logins (`400` / `401`)
 - Not logged in (`401`)
 - Malformed or missing request bodies (`400`)
@@ -233,6 +326,33 @@ arriving at the same moment could both pass the check and both create an account
 guarantees only one succeeds, and the route turns PostgreSQL's unique-violation error (code
 `23505`) into a `409`.
 
+### Invalid product details or ids: `400 Bad Request`
+`POST /products` and `PUT /products/:productId` share one set of rules, checked before anything
+reaches the database. A request is rejected if:
+- `sku` or `name` is missing or only spaces, or longer than its column (50 and 255 characters)
+- `description` is given but isn't a string
+- `price` isn't a JSON number, is negative, has more than 2 decimal places, or is over 99999999.99
+  (the most a `numeric(10,2)` column can hold)
+- `stock_quantity` isn't a whole number, is negative, or is too large for an `integer` column
+- `category_id` is given but isn't a whole number, or doesn't match an existing category
+
+Ids in the URL (`/products/abc`) and the `?category=` filter must be whole numbers from 1 up to
+the largest value PostgreSQL's `integer` type can hold. Anything else returns `400` before a query
+runs, instead of causing a database error.
+
+A `category_id` that doesn't exist is caught by the database's foreign key constraint (error code
+`23503`), which the route turns into a `400`.
+
+### Products not found: `404 Not Found`
+`GET`, `PUT` and `DELETE /products/:productId` return `404` when no product has that id, or when
+the product has been retired. Retired products are kept in the database for order history but are
+treated as gone everywhere in the API.
+
+### Duplicate product SKUs: `409 Conflict`
+Every product needs a unique `sku` (stock-keeping unit). Creating or updating a product with an
+`sku` another product already uses returns `409`. Like duplicate emails, this is caught by the
+database's `UNIQUE` constraint so simultaneous requests can't both succeed.
+
 ### Failed logins: `400 Bad Request` / `401 Unauthorized`
 `POST /auth/login` returns `400` if `email` or `password` is missing, and `401` if they don't
 match an account. A wrong password and an unknown email return exactly the same `401` message.
@@ -240,8 +360,8 @@ Different messages would let anyone check whether an email address has an accoun
 
 ### Not logged in: `401 Unauthorized`
 Routes that need a logged-in customer use the `requireAuth` middleware, which returns `401`
-before the route runs if there's no active session. `POST /auth/logout` uses it now, and the cart,
-account and order routes will too.
+before the route runs if there's no active session. `POST /auth/logout` and the product create,
+update and retire routes use it now, and the cart, account and order routes will too.
 
 ### Malformed or missing request bodies: `400 Bad Request`
 A body that isn't valid JSON, or a request with no body at all, returns `400` instead of
@@ -258,12 +378,15 @@ errors can reveal how the app works internally.
 
 ### Testing
 The API is built using test-driven development (TDD): each test is written first and run to
-confirm it fails, then just enough code is added to make it pass. There are 44 tests:
+confirm it fails, then just enough code is added to make it pass. There are 106 tests:
 - **Registration (27):** successful registration, duplicate accounts (including simultaneous
   requests), and each type of invalid input above
 - **Login and logout (17):** successful login, staying logged in across requests, the `HttpOnly`
   session cookie, identical errors for a wrong password and an unknown email, missing details,
   and logging out
+- **Products (62):** listing and filtering by category, getting a single product, retired products
+  staying hidden, creating, updating and retiring products, login being required to make changes,
+  duplicate SKUs, unknown categories, and each type of invalid product detail or id above
 
 Every test runs against a real PostgreSQL test database, not mocks. See [Run the tests](#6-run-the-tests) for how to run them.
 
