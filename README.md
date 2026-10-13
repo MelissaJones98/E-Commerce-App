@@ -154,19 +154,56 @@ any database whose name doesn't end in `_test`.
 - React
 
 ## Error Handling and Testing
+All errors are returned as JSON in the form `{ "error": "description of the problem" }`, with an
+HTTP status code that describes the type of error.
+
 Implemented error handling for:
-- Error 1
-- Error 2
-- Error 3
+- Invalid registration details (`400`)
+- Duplicate accounts (`409`)
+- Malformed or missing request bodies (`400`)
+- Unexpected server errors (`500`)
+- Database unavailable (`503`)
 
-### Error 1
+### Invalid registration details: `400 Bad Request`
+`POST /auth/register` checks every field before anything reaches the database, and returns a
+message describing the first problem it finds. A request is rejected if:
+- `first_name`, `last_name`, `email` or `password` is missing, empty, or only spaces
+- `first_name` or `last_name` is over 100 characters, or `email` is over 255 (the column sizes in `schema.sql`)
+- `email` isn't in the form `name@domain.tld`
+- `password` is not a string, or is under 8 characters
+- `password` is over 72 **bytes**. bcrypt silently ignores anything past 72 bytes, so a longer
+  password would appear to work while only part of it was checked. The limit is measured in bytes,
+  not characters, because characters such as `é` take up more than one byte.
 
+### Duplicate accounts: `409 Conflict`
+Registering with an email that already has an account returns `409`. Emails are trimmed and
+lower-cased before saving, so `Ada@Example.com` and `ada@example.com` count as the same account.
 
-### Error 2
+Duplicates are caught by the database's `UNIQUE` constraint on `customers.email`, not by checking
+for the email first. A check-then-insert approach has a race condition: two identical requests
+arriving at the same moment could both pass the check and both create an account. The constraint
+guarantees only one succeeds, and the route turns PostgreSQL's unique-violation error (code
+`23505`) into a `409`.
 
+### Malformed or missing request bodies: `400 Bad Request`
+A body that isn't valid JSON, or a request with no body at all, returns `400` instead of
+crashing the route.
 
-### Error 3
+### Unexpected server errors: `500 Internal Server Error`
+Any other error reaches a central error handler in `app.js`. It logs the full details on the server
+but sends the client only `{ "error": "Internal server error" }`, because stack traces and database
+errors can reveal how the app works internally.
 
+### Database unavailable: `503 Service Unavailable`
+`GET /health` returns `503` if the app is running but can't reach PostgreSQL. This separates
+"the app is down" from "the database is down".
+
+### Testing
+The API is built using test-driven development (TDD): each test is written first and run to
+confirm it fails, then just enough code is added to make it pass. The registration endpoint has
+27 tests covering successful registration, duplicate accounts (including simultaneous requests),
+and each type of invalid input above. Every test runs against a real PostgreSQL test database, not
+mocks. See [Run the tests](#6-run-the-tests) for how to run them.
 
 ## Future Work
 - Enable users to rate and review products
