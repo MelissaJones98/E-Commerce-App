@@ -31,14 +31,23 @@ reasoning behind each design decision, is in [docs/database-design.md](docs/data
 ```
 e-commerce-app/
 ├── back-end/
-│   ├── app.js              # Express server and routes
+│   ├── app.js              # Express app: middleware, routes and error handling
+│   ├── server.js           # Starts the server (entry point for npm start / npm run dev)
+│   ├── routes/
+│   │   └── auth.js         # /auth routes (registration)
 │   ├── db/
 │   │   ├── index.js        # PostgreSQL connection pool and query helper
-│   │   └── schema.sql      # Creates the database tables
+│   │   ├── schema.sql      # Creates the database tables
+│   │   └── reset-test-db.js # Rebuilds the test database from schema.sql
+│   ├── tests/
+│   │   ├── auth.register.test.js # Tests for POST /auth/register
+│   │   └── helpers.js      # Shared test helpers (e.g. emptying tables between tests)
 │   ├── .env                # Your local settings (not committed, see below)
+│   ├── .env.test           # Test settings: points tests at the ecommerce_test database
 │   └── package.json
 └── docs/
-    └── database-design.md  # Database design and ERD
+    ├── database-design.md  # Database design and ERD
+    └── api-endpoints.md    # Planned REST API endpoints
 ```
 
 ## How to Use
@@ -81,7 +90,7 @@ PGPASSWORD=your-postgres-password
 `.env` is listed in `.gitignore`, so your password is never committed.
 
 ### 4. Start the server
-From the `back-end` folder:
+All `npm` commands must be run from the `back-end` folder, where `package.json` is:
 ```bash
 npm run dev    # restarts automatically when you save a file
 npm start      # runs without auto-restart
@@ -92,8 +101,47 @@ npm start      # runs without auto-restart
 |---|---|
 | `GET /` | Returns `Hello World!` |
 | `GET /health` | Confirms the database connection. Returns `{"status":"ok","database":"ecommerce",...}`, or a `503` error if the database can't be reached |
+| `POST /auth/register` | Creates a customer account (see below) |
 
 Visit http://localhost:3000/health in your browser to test it.
+
+To try registration in Postman, send a **POST** request to `http://localhost:3000/auth/register`
+with **Body → raw → JSON**:
+```json
+{
+  "first_name": "Ada",
+  "last_name": "Lovelace",
+  "email": "ada@example.com",
+  "password": "correct-horse-battery"
+}
+```
+| Response | When |
+|---|---|
+| `201 Created` | The account was created. Returns the new customer (never the password) |
+| `400 Bad Request` | A field is missing or invalid: e.g. a malformed email, or a password under 8 characters or over 72 bytes |
+| `409 Conflict` | An account with that email already exists (emails are case-insensitive) |
+
+This creates a real account in your `ecommerce` database.
+
+### 6. Run the tests
+The tests use a separate `ecommerce_test` database, so they never touch your real data.
+`.env.test` switches the database name; all other connection details come from your `.env`.
+
+Create the test database once, from the `back-end` folder:
+```bash
+npm run db:test:reset
+```
+This drops `ecommerce_test` if it exists, recreates it, and runs `schema.sql`. Run it again
+whenever you change `schema.sql`, so the test database stays in sync.
+
+Then run the tests:
+```bash
+npm test
+```
+Tests are written with Node's built-in test runner (`node:test`) and
+[Supertest](https://github.com/ladjs/supertest), which sends HTTP requests to the app without
+starting a server. Every table is emptied before each test, and the helper refuses to run on
+any database whose name doesn't end in `_test`.
 
 ## Technologies
 - JavaScript
