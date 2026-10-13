@@ -3,13 +3,18 @@
 import express from 'express';
 // Import the query helper that runs SQL against the PostgreSQL database.
 import { query } from './db/index.js';
+import authRouter from './routes/auth.js';
 
 // Create the application object. Routes and middleware are attached to it.
+// The server is started in server.js, so tests can import the app without
+// it listening on a port.
 const app = express();
 
-// Use the PORT environment variable if one is set (hosting platforms such as
-// Render or Heroku set it for you), otherwise fall back to 3000 for local dev.
-const port = process.env.PORT || 3000;
+// Parse JSON request bodies so routes can read them from req.body.
+app.use(express.json());
+
+// All routes in routes/auth.js are reached under /auth, e.g. /auth/register.
+app.use('/auth', authRouter);
 
 // Route: when a GET request arrives at "/", send back a plain-text response.
 // `req` holds details of the incoming request (unused here); `res` is used to reply.
@@ -30,7 +35,17 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// Start the server listening for requests on the chosen port.
-app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
+// Error handler: Express sends any error thrown in a route here.
+// It must take four arguments, which is how Express recognises it.
+app.use((err, req, res, next) => {
+  // express.json() raises this when the request body isn't valid JSON.
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'Request body must be valid JSON' });
+  }
+  // Anything else is unexpected: log the details, but don't send them to the
+  // client, as they can reveal how the app works internally.
+  console.error(err);
+  res.status(500).json({ error: 'Internal server error' });
 });
+
+export default app;
