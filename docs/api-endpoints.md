@@ -11,7 +11,7 @@ database tables:
 | Resource | What it is | Table(s) |
 |---|---|---|
 | Auth | Registering, logging in and out | `customers` |
-| Products | Items for sale, browsable by anyone | `products` |
+| Products | Items for sale, browsable by anyone | `products`, `categories` |
 | Account | The logged-in customer's own details | `customers` |
 | Addresses | The logged-in customer's saved addresses | `addresses` |
 | Cart | Products the customer intends to buy | `cart_items` *(new, see [Schema changes needed](#schema-changes-needed))* |
@@ -95,23 +95,51 @@ Use the same message for both, so the response doesn't reveal which emails are r
 | Method | Path | Access | Description | Success |
 |---|---|---|---|---|
 | `GET` | `/products` | Public | List active products | `200` |
+| `GET` | `/products?category=:categoryId` | Public | List active products in one category | `200` |
 | `GET` | `/products/:productId` | Public | Get one product | `200` |
 | `POST` | `/products` | Customer | Create a product | `201` |
-| `PUT` | `/products/:productId` | Customer | Update a product (price, stock, etc.) | `200` |
+| `PUT` | `/products/:productId` | Customer | Replace a product's details | `200` |
 | `DELETE` | `/products/:productId` | Customer | Retire a product | `204` |
 
-`GET /products` supports optional query parameters:
-- `?search=mug` matches product names
-- `?page=2&limit=20` splits results into pages
-
-Response `200`:
+`GET /products` response `200` (products in `id` order):
 ```json
 [
-  { "id": 7, "sku": "MUG-001", "name": "Coffee Mug", "description": "...", "price": "8.50", "stock_quantity": 42 }
+  {
+    "id": 7,
+    "category_id": 2,
+    "sku": "MUG-001",
+    "name": "Coffee Mug",
+    "description": "A 350ml ceramic mug",
+    "price": "8.50",
+    "stock_quantity": 42
+  }
 ]
 ```
-`price` comes back as a string. `pg` returns `numeric` columns as strings to avoid
-the rounding errors that converting to a JavaScript number could cause.
+- **`price` comes back as a string.** `pg` returns `numeric` columns as strings to avoid
+  the rounding errors that converting to a JavaScript number could cause.
+- **`?category=`** must be a whole number (`400` otherwise). A category with no products,
+  or one that doesn't exist, returns an empty list.
+- **Retired products** (`is_active = false`) never appear in either `GET` route; fetching
+  one by id returns `404`.
+
+`POST /products` and `PUT /products/:productId` take the same body:
+```json
+{
+  "sku": "MUG-001",
+  "name": "Coffee Mug",
+  "description": "A 350ml ceramic mug",
+  "price": 8.5,
+  "stock_quantity": 42,
+  "category_id": 2
+}
+```
+- `description` and `category_id` are optional (leave them out or send `null`).
+- `price` must be a JSON number (not a string) from 0 to 99999999.99, with at most 2 decimal places.
+- `stock_quantity` must be a whole number, 0 or more.
+- `PUT` replaces every field, so send the complete product, not just the fields that changed.
+
+Errors: `400` invalid body or id, or a `category_id` that doesn't exist; `401` not logged in;
+`404` product doesn't exist or is retired; `409` another product already has the SKU.
 
 `DELETE /products/:productId` sets `is_active = false` and keeps the row. Products
 that appear on past orders can't be deleted (see the database design).
@@ -247,4 +275,4 @@ Add this to `schema.sql` and the ERD before building the cart endpoints.
 3. **Account and Addresses**
 4. **Cart**: after adding the `cart_items` table
 5. **Checkout and Orders**
-6. **Product create/update/delete, Google sign-in, Stripe**: in their own later tickets
+6. **Google sign-in, Stripe**: in their own later tickets

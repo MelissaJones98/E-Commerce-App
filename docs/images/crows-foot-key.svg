@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="560" height="190" viewBox="0 0 560 190" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="245" viewBox="0 0 560 245" font-family="Segoe UI, Helvetica, Arial, sans-serif">
   <title>Crow's foot notation key</title>
   <!-- White background so the key is readable in dark mode too -->
-  <rect width="560" height="190" fill="#ffffff" rx="6"/>
+  <rect width="560" height="245" fill="#ffffff" rx="6"/>
 
   <g stroke="#333333" stroke-width="2" fill="none">
     <!-- Row 1: exactly one (two bars) -->
@@ -10,33 +10,42 @@
     <line x1="156" y1="29" x2="156" y2="51"/>
     <rect x="170" y="22" width="56" height="36" fill="#f3f3f3"/>
 
-    <!-- Row 2: zero or more (circle + crow's foot) -->
+    <!-- Row 2: zero or one (circle + bar) -->
     <line x1="24" y1="95" x2="170" y2="95"/>
-    <line x1="148" y1="95" x2="170" y2="84"/>
-    <line x1="148" y1="95" x2="170" y2="106"/>
-    <circle cx="134" cy="95" r="7" fill="#ffffff"/>
+    <line x1="156" y1="84" x2="156" y2="106"/>
+    <circle cx="138" cy="95" r="7" fill="#ffffff"/>
     <rect x="170" y="77" width="56" height="36" fill="#f3f3f3"/>
 
-    <!-- Row 3: one or more (bar + crow's foot) -->
+    <!-- Row 3: zero or more (circle + crow's foot) -->
     <line x1="24" y1="150" x2="170" y2="150"/>
     <line x1="148" y1="150" x2="170" y2="139"/>
     <line x1="148" y1="150" x2="170" y2="161"/>
-    <line x1="138" y1="139" x2="138" y2="161"/>
+    <circle cx="134" cy="150" r="7" fill="#ffffff"/>
     <rect x="170" y="132" width="56" height="36" fill="#f3f3f3"/>
+
+    <!-- Row 4: one or more (bar + crow's foot) -->
+    <line x1="24" y1="205" x2="170" y2="205"/>
+    <line x1="148" y1="205" x2="170" y2="194"/>
+    <line x1="148" y1="205" x2="170" y2="216"/>
+    <line x1="138" y1="194" x2="138" y2="216"/>
+    <rect x="170" y="187" width="56" height="36" fill="#f3f3f3"/>
   </g>
 
   <g fill="#333333" font-size="12" text-anchor="middle">
     <text x="198" y="44">table</text>
     <text x="198" y="99">table</text>
     <text x="198" y="154">table</text>
+    <text x="198" y="209">table</text>
   </g>
 
   <g fill="#111111" font-size="15">
     <text x="250" y="38" font-weight="600">Exactly one</text>
     <text x="250" y="56" font-size="13" fill="#555555">Two bars</text>
-    <text x="250" y="93" font-weight="600">Zero or more</text>
-    <text x="250" y="111" font-size="13" fill="#555555">Circle + crow's foot (the three-pronged fork)</text>
-    <text x="250" y="148" font-weight="600">One or more</text>
-    <text x="250" y="166" font-size="13" fill="#555555">Bar + crow's foot</text>
+    <text x="250" y="93" font-weight="600">Zero or one</text>
+    <text x="250" y="111" font-size="13" fill="#555555">Circle + bar</text>
+    <text x="250" y="148" font-weight="600">Zero or more</text>
+    <text x="250" y="166" font-size="13" fill="#555555">Circle + crow's foot (the three-pronged fork)</text>
+    <text x="250" y="203" font-weight="600">One or more</text>
+    <text x="250" y="221" font-size="13" fill="#555555">Bar + crow's foot</text>
   </g>
 </svg>

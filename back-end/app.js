@@ -6,6 +6,7 @@ import { query } from './db/index.js';
 import session from 'express-session';
 import passport from './config/passport.js';
 import authRouter from './routes/auth.js';
+import productsRouter from './routes/products.js';
 
 // The session secret signs the session cookie so it can't be forged.
 // Fail immediately with a clear message rather than running insecurely.
@@ -43,6 +44,7 @@ app.use(passport.session());
 
 // All routes in routes/auth.js are reached under /auth, e.g. /auth/register.
 app.use('/auth', authRouter);
+app.use('/products', productsRouter);
 
 // Route: when a GET request arrives at "/", send back a plain-text response.
 // `req` holds details of the incoming request (unused here); `res` is used to reply.

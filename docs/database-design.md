@@ -11,6 +11,7 @@ erDiagram
     ADDRESSES ||--o{ ORDERS : "is shipped to"
     ORDERS ||--|{ ORDER_ITEMS : "contains"
     PRODUCTS ||--o{ ORDER_ITEMS : "appears in"
+    CATEGORIES |o--o{ PRODUCTS : "groups"
 
     CUSTOMERS {
         int id PK
@@ -36,8 +37,14 @@ erDiagram
         timestamptz created_at
     }
 
+    CATEGORIES {
+        int id PK
+        varchar name UK
+    }
+
     PRODUCTS {
         int id PK
+        int category_id FK
         varchar sku UK
         varchar name
         text description
@@ -106,6 +113,7 @@ contain **at least one** item.
 | Drawn symbol | Mermaid code | Meaning |
 |---|---|---|
 | Two bars | `\|\|` | Exactly one |
+| Circle + bar | `o\|` (or `\|o` on the left side) | Zero or one |
 | Circle + crow's foot | `o{` (or `}o` on the left side) | Zero or more |
 | Bar + crow's foot | `\|{` (or `}\|` on the left side) | One or more |
 
@@ -121,6 +129,7 @@ circle + crow's foot at the ORDERS end.
 | Customer → Orders | One customer places zero or many orders | `orders.customer_id` |
 | Address → Orders | One address can be used for many orders | `orders.shipping_address_id` |
 | Order ↔ Products | Many-to-many: an order holds many products, a product appears in many orders | `order_items` join table |
+| Category → Products | One category groups zero or many products; a product is in zero or one category | `products.category_id` (nullable) |
 
 `order_items` isn't in the ticket's table list, but it's required: an order can't
 hold a list of products in a single column, so each line of an order (product +
@@ -156,11 +165,19 @@ quantity) gets its own row.
 | is_default | boolean | NOT NULL, default `false` |
 | created_at | timestamptz | NOT NULL, default `now()` |
 
+### categories
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | integer | PK, generated identity |
+| name | varchar(100) | NOT NULL, UNIQUE |
+
 ### products
 
 | Column | Type | Constraints |
 |---|---|---|
 | id | integer | PK, generated identity |
+| category_id | integer | nullable, FK → `categories.id`, ON DELETE SET NULL |
 | sku | varchar(50) | NOT NULL, UNIQUE |
 | name | varchar(255) | NOT NULL |
 | description | text | nullable |
@@ -211,9 +228,12 @@ quantity) gets its own row.
   `CHECK (stock_quantity >= 0)` constraint is a safety net if that ever fails.
 - **One default address per customer** can be enforced with a partial unique index:
   `CREATE UNIQUE INDEX ON addresses (customer_id) WHERE is_default;`
+- **A product has at most one category, and categories are optional.** Deleting a
+  category doesn't delete its products: `ON DELETE SET NULL` makes them uncategorised.
+  Unlike orders, nothing important is lost when a category goes.
 
 ## Possible later additions
 
 - `carts` / `cart_items` tables, so a basket persists between sessions before checkout
 - `billing_address_id` on `orders`, once payments are added
-- `categories` table for grouping products
+- A `product_categories` join table, if products ever need to be in more than one category

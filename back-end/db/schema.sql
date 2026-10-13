@@ -70,11 +70,23 @@ CREATE UNIQUE INDEX addresses_one_default_per_customer
   ON addresses (customer_id) WHERE is_default;
 
 -- ---------------------------------------------------------------------------
+-- categories
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE categories (
+  id   integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name varchar(100) NOT NULL UNIQUE
+);
+
+-- ---------------------------------------------------------------------------
 -- products
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE products (
   id             integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  -- Optional: a product can be uncategorised. If its category is deleted,
+  -- the product stays and becomes uncategorised (SET NULL).
+  category_id    integer       REFERENCES categories (id) ON DELETE SET NULL,
   sku            varchar(50)   NOT NULL UNIQUE,
   name           varchar(255)  NOT NULL,
   description    text,
@@ -84,6 +96,9 @@ CREATE TABLE products (
   created_at     timestamptz   NOT NULL DEFAULT now(),
   updated_at     timestamptz   NOT NULL DEFAULT now()
 );
+
+-- Speeds up GET /products?category=... (Postgres doesn't index foreign keys automatically).
+CREATE INDEX products_category_id_idx ON products (category_id);
 
 CREATE TRIGGER products_set_updated_at
   BEFORE UPDATE ON products
