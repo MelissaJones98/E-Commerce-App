@@ -19,12 +19,14 @@ export const resetTables = async () => {
 
 // Registers a customer and logs them in. Returns a supertest agent that
 // keeps the session cookie, so its requests are made as that customer.
-export const loggedInAgent = async () => {
+// Pass details to override the defaults, e.g. a different email for a second customer.
+export const loggedInAgent = async (details = {}) => {
   const customer = {
     first_name: 'Test',
     last_name: 'Customer',
     email: 'test.customer@example.com',
     password: 'test-password',
+    ...details,
   };
   await request(app).post('/auth/register').send(customer);
 

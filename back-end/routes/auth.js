@@ -5,6 +5,7 @@ import { query } from '../db/index.js';
 import passport from '../config/passport.js';
 import { requireAuth } from '../middleware/require-auth.js';
 import { normalizeEmail } from '../utils/normalize-email.js';
+import { isNonEmptyString, validateNameAndEmail } from '../utils/validate-customer.js';
 
 const router = express.Router();
 
@@ -15,27 +16,14 @@ const SALT_ROUNDS = 12;
 // PostgreSQL's error code for breaking a UNIQUE constraint.
 const UNIQUE_VIOLATION = '23505';
 
-// A deliberately simple email check: something@something.something, no spaces.
-// Fully validating email addresses is notoriously complex; the real test is
-// whether the address receives mail.
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-const isNonEmptyString = (value) => typeof value === 'string' && value.trim() !== '';
-
 // Checks the registration details. Returns an error message describing the
 // first problem found, or null if everything is valid.
-const validateRegistration = ({ first_name, last_name, email, password }) => {
-  if (!isNonEmptyString(first_name)) return 'first_name is required';
-  if (first_name.length > 100) return 'first_name must be 100 characters or fewer';
+const validateRegistration = (details) => {
+  // Name and email rules are shared with PUT /account.
+  const nameOrEmailError = validateNameAndEmail(details);
+  if (nameOrEmailError) return nameOrEmailError;
 
-  if (!isNonEmptyString(last_name)) return 'last_name is required';
-  if (last_name.length > 100) return 'last_name must be 100 characters or fewer';
-
-  if (!isNonEmptyString(email)) return 'email is required';
-  // Limits match the column sizes in schema.sql (varchar(255)).
-  if (email.trim().length > 255) return 'email must be 255 characters or fewer';
-  if (!EMAIL_PATTERN.test(email.trim())) return 'email must be a valid email address';
-
+  const { password } = details;
   if (typeof password !== 'string') return 'password is required';
   if (password.length < 8) return 'password must be at least 8 characters';
   // bcrypt only uses the first 72 bytes of a password and silently ignores
