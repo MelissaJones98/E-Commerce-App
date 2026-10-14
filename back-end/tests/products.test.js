@@ -1,14 +1,36 @@
 // Tests for the /products routes.
-// Run with: npm test (uses the ecommerce_test database, see .env.test)
+// Run with: npm test (from the back-end folder). Uses the ecommerce_test
+// database (see .env.test), so real data is never touched.
+//
+// How these tests work:
+//   - `describe(name, fn)` groups related tests; `test(name, fn)` is one test.
+//   - `assert.*` functions check results; a failed check fails the test.
+//   - Test products and categories are inserted straight into the database
+//     with the helpers from tests/helpers.js, then the API is called with
+//     supertest and its response is checked.
+//   - Expected responses are written out by hand (e.g. price: '8.50'), so a
+//     wrong field, a missing field or an extra field all fail the test.
+
+// node:test is Node's built-in test runner.
 import { describe, test, beforeEach, after } from 'node:test';
+// assert/strict: checks such as assert.equal(actual, expected), matching exactly.
 import assert from 'node:assert/strict';
+// supertest sends HTTP requests straight to the app, without starting a server.
 import request from 'supertest';
 
 import app from '../app.js';
+// pool: the database connection pool, used to check what was actually saved.
 import pool from '../db/index.js';
+// Helpers (see tests/helpers.js):
+//   resetTables:    empties every table
+//   loggedInAgent:  registers and logs in a customer; returns an agent that stays logged in
+//   insertCategory: adds a category with SQL, returning its id
+//   insertProduct:  adds a product with SQL, returning its id
 import { resetTables, loggedInAgent, insertCategory, insertProduct } from './helpers.js';
 
-// A valid product body for POST and PUT. Tests copy it and change one field.
+// A valid product body for POST and PUT. Tests copy it and change one field,
+// using spread syntax: `{ ...validProduct, price: -1 }` is a copy with price -1.
+// Note price is a JSON number here (8.5); the API sends it back as a string ('8.50').
 const validProduct = {
   sku: 'MUG-001',
   name: 'Coffee Mug',
@@ -18,21 +40,30 @@ const validProduct = {
   category_id: null,
 };
 
+// Reads a product's row straight from the database, including internal
+// columns like is_active that the API doesn't return.
 const getProductRow = async (id) => {
   const result = await pool.query('SELECT * FROM products WHERE id = $1', [id]);
   return result.rows[0];
 };
 
+// Counts every product row (active or retired).
+// `::int` converts PostgreSQL's count (which pg returns as a string) to an integer.
 const countProducts = async () => {
   const result = await pool.query('SELECT count(*)::int AS count FROM products');
   return result.rows[0].count;
 };
 
+// Empty every table before each test, so tests can't affect each other.
+// Because id numbering restarts too, the first product inserted has id 1.
 beforeEach(resetTables);
+// Close the database connections after the last test, or Node won't exit.
 after(() => pool.end());
 
 describe('GET /products', () => {
   test('returns 200 with every active product, in id order', async () => {
+    // Set up: one category and two products (one in the category, one not).
+    // Fields left out of insertProduct() use its defaults (see tests/helpers.js).
     const kitchen = await insertCategory('Kitchen');
     await insertProduct({
       sku: 'MUG-001',
@@ -47,6 +78,9 @@ describe('GET /products', () => {
     const res = await request(app).get('/products');
 
     assert.equal(res.status, 200);
+    // deepEqual checks the whole array: the order, every property of each
+    // product, and that there are no extra properties (e.g. is_active must
+    // not be sent). Prices come back as strings with 2 decimal places.
     assert.deepEqual(res.body, [
       {
         id: 1,
@@ -75,6 +109,8 @@ describe('GET /products', () => {
 
     const res = await request(app).get('/products');
 
+    // .map() turns the array of products into an array of just their names,
+    // which is easier to compare. Only the active product should be listed.
     assert.deepEqual(
       res.body.map((product) => product.name),
       ['Coffee Mug']
@@ -97,6 +133,8 @@ describe('GET /products', () => {
       await insertProduct({ sku: 'TEA-001', name: 'Teapot', category_id: kitchen });
       await insertProduct({ sku: 'MISC-001', name: 'Uncategorised thing' });
 
+      // A template literal builds the URL with the Kitchen category's id,
+      // e.g. /products?category=1.
       const res = await request(app).get(`/products?category=${kitchen}`);
 
       assert.equal(res.status, 200);
@@ -122,12 +160,15 @@ describe('GET /products', () => {
     test('returns an empty list for a category with no products', async () => {
       await insertProduct({ sku: 'MUG-001', name: 'Coffee Mug' });
 
+      // No category has id 999, so nothing matches. That's not an error.
       const res = await request(app).get('/products?category=999');
 
       assert.equal(res.status, 200);
       assert.deepEqual(res.body, []);
     });
 
+    // One test per invalid value. '99999999999' is too big for PostgreSQL's
+    // integer type; without the check it would cause a database error (500).
     for (const value of ['abc', '1.5', '-1', '0', '99999999999']) {
       test(`returns 400 when category is "${value}"`, async () => {
         const res = await request(app).get(`/products?category=${value}`);
@@ -194,6 +235,7 @@ describe('GET /products/:productId', () => {
 
 describe('POST /products', () => {
   test('returns 401 and creates nothing when not logged in', async () => {
+    // `request(app)` has no login cookie, so this is an anonymous request.
     const res = await request(app).post('/products').send(validProduct);
 
     assert.equal(res.status, 401);
@@ -201,6 +243,7 @@ describe('POST /products', () => {
   });
 
   test('returns 201 with the new product', async () => {
+    // An agent that's logged in, so its requests pass requireAuth.
     const agent = await loggedInAgent();
 
     const res = await agent.post('/products').send(validProduct);
@@ -222,6 +265,7 @@ describe('POST /products', () => {
 
     const res = await agent.post('/products').send(validProduct);
 
+    // Read the row directly: is_active isn't in the API response.
     const row = await getProductRow(res.body.id);
     assert.equal(row.name, 'Coffee Mug');
     assert.equal(row.is_active, true);
@@ -239,6 +283,9 @@ describe('POST /products', () => {
 
   test('accepts a product with no description or category', async () => {
     const agent = await loggedInAgent();
+    // Destructuring with "rest": take description and category_id out, and
+    // put every other property into minimalProduct. So minimalProduct is
+    // validProduct without those two optional fields.
     const { description, category_id, ...minimalProduct } = validProduct;
 
     const res = await agent.post('/products').send(minimalProduct);
@@ -248,6 +295,8 @@ describe('POST /products', () => {
     assert.equal(res.body.category_id, null);
   });
 
+  // Boundary test: 0 is the lowest allowed value for both, so it must be
+  // accepted (this catches mistakes like writing `price <= 0` instead of `price < 0`).
   test('accepts a price of 0 and stock of 0', async () => {
     const agent = await loggedInAgent();
 
@@ -259,6 +308,7 @@ describe('POST /products', () => {
   });
 
   test('returns 409 when another product already has the SKU', async () => {
+    // A product with validProduct's SKU already exists.
     await insertProduct({ sku: 'MUG-001' });
     const agent = await loggedInAgent();
 
@@ -272,6 +322,7 @@ describe('POST /products', () => {
   test('returns 400 when the category does not exist', async () => {
     const agent = await loggedInAgent();
 
+    // No category has id 999, so the database's foreign key rejects it.
     const res = await agent.post('/products').send({ ...validProduct, category_id: 999 });
 
     assert.equal(res.status, 400);
@@ -279,8 +330,11 @@ describe('POST /products', () => {
     assert.equal(await countProducts(), 0);
   });
 
-  // Every way a product body can be invalid. All should be rejected with
-  // 400 and must not create a product. PUT uses the same rules.
+  // A "table-driven" test: each entry is [description, request body], one
+  // way a product body can be invalid. The loop below turns each entry into
+  // its own test. All should be rejected with 400 and must not create a
+  // product. PUT uses the same rules.
+  // Setting a field to `undefined` leaves it out of the JSON body entirely.
   const invalidCases = [
     ['sku is missing', { ...validProduct, sku: undefined }],
     ['sku is only spaces', { ...validProduct, sku: '   ' }],
@@ -291,16 +345,20 @@ describe('POST /products', () => {
     ['price is missing', { ...validProduct, price: undefined }],
     ['price is a string', { ...validProduct, price: '8.50' }],
     ['price is negative', { ...validProduct, price: -1 }],
+    // Without the decimal check, PostgreSQL would silently round 8.505 to 8.51.
     ['price has more than 2 decimal places', { ...validProduct, price: 8.505 }],
+    // numeric(10,2) holds at most 99999999.99, so 100000000 is one too many digits.
     ['price is too large for the database', { ...validProduct, price: 100000000 }],
     ['stock_quantity is missing', { ...validProduct, stock_quantity: undefined }],
     ['stock_quantity is negative', { ...validProduct, stock_quantity: -1 }],
     ['stock_quantity is not a whole number', { ...validProduct, stock_quantity: 1.5 }],
+    // 2147483648 is one more than the largest PostgreSQL integer.
     ['stock_quantity is too large for the database', { ...validProduct, stock_quantity: 2147483648 }],
     ['category_id is not a whole number', { ...validProduct, category_id: 1.5 }],
     ['category_id is a string', { ...validProduct, category_id: '1' }],
   ];
 
+  // `for...of` loops over the array; `[name, body]` unpacks each entry.
   for (const [name, body] of invalidCases) {
     test(`returns 400 when ${name}`, async () => {
       const agent = await loggedInAgent();
@@ -316,6 +374,7 @@ describe('POST /products', () => {
   test('returns 400 when no body is sent', async () => {
     const agent = await loggedInAgent();
 
+    // No .send(), so the request has no body at all.
     const res = await agent.post('/products');
 
     assert.equal(res.status, 400);
@@ -340,6 +399,8 @@ describe('PUT /products/:productId', () => {
     const res = await request(app).put(`/products/${id}`).send(updatedProduct);
 
     assert.equal(res.status, 401);
+    // `(await getProductRow(id)).name`: wait for the row, then read its name.
+    // The brackets make the await happen before `.name` is read.
     assert.equal((await getProductRow(id)).name, 'Coffee Mug');
   });
 
@@ -369,6 +430,7 @@ describe('PUT /products/:productId', () => {
 
     const row = await getProductRow(id);
     assert.equal(row.name, 'Large Coffee Mug');
+    // pg returns numeric columns as strings, so the price reads as '12.00'.
     assert.equal(row.price, '12.00');
   });
 
@@ -421,6 +483,7 @@ describe('PUT /products/:productId', () => {
   });
 
   test('returns 409 when another product already has the new SKU', async () => {
+    // Another product already uses updatedProduct's SKU (MUG-002).
     await insertProduct({ sku: 'MUG-002', name: 'Other Mug' });
     const id = await insertProduct({ sku: 'MUG-001', name: 'Coffee Mug' });
     const agent = await loggedInAgent();
@@ -432,6 +495,7 @@ describe('PUT /products/:productId', () => {
   });
 
   test('allows keeping the same SKU', async () => {
+    // The product being updated already has MUG-002; its own SKU mustn't count as a clash.
     const id = await insertProduct({ sku: 'MUG-002', name: 'Coffee Mug' });
     const agent = await loggedInAgent();
 
@@ -475,6 +539,7 @@ describe('DELETE /products/:productId', () => {
 
     await agent.delete(`/products/${id}`);
 
+    // Fetching it directly now gives 404, and the product list is empty.
     assert.equal((await request(app).get(`/products/${id}`)).status, 404);
     assert.deepEqual((await request(app).get('/products')).body, []);
   });
@@ -485,6 +550,7 @@ describe('DELETE /products/:productId', () => {
 
     await agent.delete(`/products/${id}`);
 
+    // The row still exists in the database, just marked inactive.
     const row = await getProductRow(id);
     assert.equal(row.is_active, false);
   });

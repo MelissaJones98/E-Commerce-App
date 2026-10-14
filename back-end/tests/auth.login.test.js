@@ -1,13 +1,30 @@
 // Tests for POST /auth/login and POST /auth/logout.
-// Run with: npm test (uses the ecommerce_test database, see .env.test)
+// Run with: npm test (from the back-end folder). Uses the ecommerce_test
+// database (see .env.test), so real data is never touched.
+//
+// How these tests work:
+//   - `describe(name, fn)` groups related tests; `test(name, fn)` is one test.
+//   - `assert.*` functions check results; a failed check fails the test.
+//   - Logging in sets a session cookie. To check you STAY logged in, a test
+//     needs something that keeps cookies between requests, like a browser.
+//     That's a supertest "agent" (see newAgent below).
+
+// node:test is Node's built-in test runner.
+//   beforeEach: runs a function before every test in its describe block
+//   after:      runs a function once, after all the tests
 import { describe, test, beforeEach, after } from 'node:test';
+// assert/strict: checks such as assert.equal(actual, expected), matching exactly.
 import assert from 'node:assert/strict';
+// supertest sends HTTP requests straight to the app, without starting a server.
 import request from 'supertest';
 
 import app from '../app.js';
+// pool: the database connection pool (closed at the end with pool.end()).
 import pool from '../db/index.js';
+// resetTables: empties every table (see tests/helpers.js).
 import { resetTables } from './helpers.js';
 
+// The customer registered before each test.
 const customer = {
   first_name: 'Ada',
   last_name: 'Lovelace',
@@ -15,10 +32,12 @@ const customer = {
   password: 'correct-horse-battery',
 };
 
+// The correct login details for that customer: a body for POST /auth/login.
 const credentials = { email: customer.email, password: customer.password };
 
-// An agent keeps cookies between requests, like a browser does, so it stays
-// logged in after a successful login.
+// Creates a new agent. An agent keeps cookies between its requests, like a
+// browser does, so after a successful login its later requests are logged in.
+// A plain `request(app)` call has no memory: every request starts logged out.
 const newAgent = () => request.agent(app);
 
 // Close the database connections once every test in this file has finished.
@@ -33,8 +52,11 @@ describe('POST /auth/login', () => {
 
   describe('with correct credentials', () => {
     test('returns 200 with the customer', async () => {
+      // Requests can be "chained": create an agent, make it a POST to
+      // /auth/login, attach the JSON body, then await the response.
       const res = await newAgent().post('/auth/login').send(credentials);
 
+      // `res.status` is the HTTP status code; `res.body` is the parsed JSON body.
       assert.equal(res.status, 200);
       assert.equal(typeof res.body.id, 'number');
       assert.equal(res.body.first_name, 'Ada');
@@ -53,6 +75,8 @@ describe('POST /auth/login', () => {
     });
 
     test('accepts the email in any letter case, with surrounding spaces', async () => {
+      // `{ ...credentials, email: '...' }` is a copy of credentials with a
+      // differently-typed email. Login normalises it, so it should still match.
       const res = await newAgent()
         .post('/auth/login')
         .send({ ...credentials, email: '  ADA@Example.com ' });
@@ -73,8 +97,19 @@ describe('POST /auth/login', () => {
     test('sets the session cookie as HttpOnly, so browser JavaScript cannot read it', async () => {
       const res = await newAgent().post('/auth/login').send(credentials);
 
+      // The server sends cookies in "Set-Cookie" response headers. supertest
+      // gives them as an array of strings like
+      //   "connect.sid=abc123; Path=/; HttpOnly"
+      // `?? []` uses an empty array if there were none, so the next line fails
+      // cleanly instead of crashing.
       const cookies = res.headers['set-cookie'] ?? [];
+      // Exactly one cookie: the session cookie.
       assert.equal(cookies.length, 1);
+      // assert.match checks the text matches a regular expression:
+      //   ;       a semicolon (cookie settings are separated by them)
+      //   \s*     any number of spaces
+      //   HttpOnly  the setting itself
+      //   /i      "case-insensitive", so httponly would also match
       assert.match(cookies[0], /;\s*HttpOnly/i);
     });
   });
@@ -110,6 +145,8 @@ describe('POST /auth/login', () => {
       // Both must be login failures; two identical 404s would also be equal.
       assert.equal(wrongPassword.status, 401);
       assert.equal(unknownEmail.status, 401);
+      // deepEqual compares every property of the two bodies, so the error
+      // messages must be identical.
       assert.deepEqual(wrongPassword.body, unknownEmail.body);
     });
 
@@ -117,6 +154,8 @@ describe('POST /auth/login', () => {
       const agent = newAgent();
       await agent.post('/auth/login').send({ ...credentials, password: 'wrong-password' });
 
+      // Logout requires being logged in, so 401 here proves the failed login
+      // didn't create a logged-in session.
       const res = await agent.post('/auth/logout');
 
       assert.equal(res.status, 401);
@@ -124,6 +163,8 @@ describe('POST /auth/login', () => {
   });
 
   describe('with missing details', () => {
+    // A "table-driven" test: each entry is [description, request body], and
+    // the loop below turns each one into its own test.
     const invalidCases = [
       ['email is missing', { password: customer.password }],
       ['password is missing', { email: customer.email }],
@@ -150,6 +191,7 @@ describe('POST /auth/login', () => {
 });
 
 describe('POST /auth/logout', () => {
+  // Before each test: empty the tables and register the customer again.
   beforeEach(async () => {
     await resetTables();
     await request(app).post('/auth/register').send(customer);
@@ -176,6 +218,7 @@ describe('POST /auth/logout', () => {
   });
 
   test('returns 401 when not logged in', async () => {
+    // A brand-new agent has never logged in.
     const res = await newAgent().post('/auth/logout');
 
     assert.equal(res.status, 401);

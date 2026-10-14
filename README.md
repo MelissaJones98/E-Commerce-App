@@ -35,14 +35,16 @@ e-commerce-app/
 │   ├── server.js           # Starts the server (entry point for npm start / npm run dev)
 │   ├── routes/
 │   │   ├── auth.js         # /auth routes (register, login, logout)
-│   │   └── products.js     # /products routes (browse, create, update, retire)
+│   │   ├── products.js     # /products routes (browse, create, update, retire)
+│   │   └── account.js      # /account routes (view, update, delete your own account)
 │   ├── config/
 │   │   └── passport.js     # Passport.js setup: checks logins, remembers who's logged in
 │   ├── middleware/
 │   │   └── require-auth.js # Blocks routes from customers who aren't logged in (401)
 │   ├── utils/
-│   │   ├── normalize-email.js # Trims and lower-cases emails (shared by register and login)
-│   │   └── parse-id.js     # Checks an id from a URL is a valid whole number
+│   │   ├── normalize-email.js # Trims and lower-cases emails (shared by register, login and account)
+│   │   ├── parse-id.js     # Checks an id from a URL is a valid whole number
+│   │   └── validate-customer.js # Name, email and phone rules (shared by register and account)
 │   ├── db/
 │   │   ├── index.js        # PostgreSQL connection pool and query helper
 │   │   ├── schema.sql      # Creates the database tables (for a new database)
@@ -53,6 +55,7 @@ e-commerce-app/
 │   │   ├── auth.register.test.js # Tests for POST /auth/register
 │   │   ├── auth.login.test.js    # Tests for POST /auth/login and /auth/logout
 │   │   ├── products.test.js      # Tests for the /products routes
+│   │   ├── account.test.js       # Tests for the /account routes
 │   │   └── helpers.js      # Shared test helpers (e.g. emptying tables, logging in, adding test data)
 │   ├── .env                # Your local settings (not committed, see below)
 │   ├── .env.test           # Test settings: test database name and a test-only session secret
@@ -142,6 +145,9 @@ npm start      # runs without auto-restart
 | `POST /products` | Creates a product (must be logged in) |
 | `PUT /products/:productId` | Replaces a product's details (must be logged in) |
 | `DELETE /products/:productId` | Retires a product (must be logged in) |
+| `GET /account` | Gets your own account details (must be logged in) |
+| `PUT /account` | Replaces your name, email and phone (must be logged in) |
+| `DELETE /account` | Deletes your account and logs you out (must be logged in) |
 
 Visit http://localhost:3000/health in your browser to test it.
 
@@ -257,6 +263,34 @@ the shop but stays in the database, so past orders can still refer to it.
 | `404 Not Found` | No product with that id, or it has already been retired |
 | `409 Conflict` | Another product already has that `sku` |
 
+#### Your account
+Log in first (see above). These routes only ever work on the logged-in customer's own account:
+there's no customer id in the URL, so you can't reach anyone else's.
+
+- **View:** send a **GET** to `http://localhost:3000/account`.
+- **Update:** send a **PUT** to `http://localhost:3000/account` with **Body → raw → JSON**:
+  ```json
+  {
+    "first_name": "Ada",
+    "last_name": "Lovelace",
+    "email": "ada@example.com",
+    "phone": "+44 20 7946 0000"
+  }
+  ```
+  `PUT` replaces your details, so send `first_name`, `last_name` and `email` every time. `phone`
+  is optional; leaving it out clears it. Any other fields (such as `id` or `password_hash`) are
+  ignored. Changing your password isn't supported yet.
+- **Delete:** send a **DELETE** to `http://localhost:3000/account`. This also deletes your saved
+  addresses and logs you out.
+
+| Response | When |
+|---|---|
+| `200 OK` | Details returned (GET) or updated (PUT) |
+| `204 No Content` | Account deleted (DELETE) |
+| `400 Bad Request` | A field is missing or invalid, e.g. a malformed email or a phone number containing letters |
+| `401 Unauthorized` | You aren't logged in |
+| `409 Conflict` | The new email belongs to another account (PUT), or the account has orders and can't be deleted (DELETE) |
+
 ### 6. Run the tests
 The tests use a separate `ecommerce_test` database, so they never touch your real data.
 `.env.test` switches the database name and provides a test-only `SESSION_SECRET`; all other
@@ -299,6 +333,8 @@ Implemented error handling for:
 - Invalid product details or ids (`400`)
 - Products not found (`404`)
 - Duplicate product SKUs (`409`)
+- Invalid account details (`400`)
+- Account email already taken, or account has orders (`409`)
 - Failed logins (`400` / `401`)
 - Not logged in (`401`)
 - Malformed or missing request bodies (`400`)
@@ -353,6 +389,18 @@ Every product needs a unique `sku` (stock-keeping unit). Creating or updating a 
 `sku` another product already uses returns `409`. Like duplicate emails, this is caught by the
 database's `UNIQUE` constraint so simultaneous requests can't both succeed.
 
+### Invalid account details: `400 Bad Request`
+`PUT /account` uses the same name and email rules as registration (shared in
+`utils/validate-customer.js`), plus a rule for the optional `phone`: if given, it must be a string
+of up to 30 characters containing only digits, spaces, `+`, `-` and brackets.
+
+### Account email already taken, or account has orders: `409 Conflict`
+- **`PUT /account`** returns `409` if the new email belongs to another customer, caught by the
+  same `UNIQUE` constraint as registration. Keeping your own email is fine.
+- **`DELETE /account`** returns `409` if the customer has placed orders. `orders.customer_id` is
+  `ON DELETE RESTRICT`, so the database refuses the delete to keep order history intact. PostgreSQL
+  reports this as error code `23001` (`restrict_violation`), which the route turns into a `409`.
+
 ### Failed logins: `400 Bad Request` / `401 Unauthorized`
 `POST /auth/login` returns `400` if `email` or `password` is missing, and `401` if they don't
 match an account. A wrong password and an unknown email return exactly the same `401` message.
@@ -360,8 +408,9 @@ Different messages would let anyone check whether an email address has an accoun
 
 ### Not logged in: `401 Unauthorized`
 Routes that need a logged-in customer use the `requireAuth` middleware, which returns `401`
-before the route runs if there's no active session. `POST /auth/logout` and the product create,
-update and retire routes use it now, and the cart, account and order routes will too.
+before the route runs if there's no active session. `POST /auth/logout`, the product create,
+update and retire routes, and every `/account` route use it now, and the cart and order routes
+will too.
 
 ### Malformed or missing request bodies: `400 Bad Request`
 A body that isn't valid JSON, or a request with no body at all, returns `400` instead of
@@ -378,7 +427,7 @@ errors can reveal how the app works internally.
 
 ### Testing
 The API is built using test-driven development (TDD): each test is written first and run to
-confirm it fails, then just enough code is added to make it pass. There are 106 tests:
+confirm it fails, then just enough code is added to make it pass. There are 137 tests:
 - **Registration (27):** successful registration, duplicate accounts (including simultaneous
   requests), and each type of invalid input above
 - **Login and logout (17):** successful login, staying logged in across requests, the `HttpOnly`
@@ -387,6 +436,9 @@ confirm it fails, then just enough code is added to make it pass. There are 106 
 - **Products (62):** listing and filtering by category, getting a single product, retired products
   staying hidden, creating, updating and retiring products, login being required to make changes,
   duplicate SKUs, unknown categories, and each type of invalid product detail or id above
+- **Account (31):** viewing, updating and deleting your own account, login being required,
+  customers never seeing or changing each other's accounts, ignoring fields like `password_hash`,
+  taken emails, accounts with orders, and each type of invalid account detail above
 
 Every test runs against a real PostgreSQL test database, not mocks. See [Run the tests](#6-run-the-tests) for how to run them.
 
