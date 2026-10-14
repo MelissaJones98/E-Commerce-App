@@ -1,0 +1,436 @@
+{
+  "info": {
+    "name": "E-Commerce API: End-to-End Tests",
+    "description": "End-to-end (E2E) tests for the e-commerce API.\n\n**What \"end-to-end\" means here:** these requests go to the REAL running server (`npm run dev` or `npm start`), which talks to the REAL `ecommerce` database, the same way a browser or the Postman app would. That's different from the unit/integration tests in `tests/*.test.js` (run with `npm test`), which load the app directly in Node and use the separate `ecommerce_test` database.\n\n**How to run:** start the server, then from the `back-end` folder run `npm run test:e2e`. Newman (Postman's command-line runner) runs every request below, in order, top to bottom. You can also import this file into the Postman app (File → Import) and use its Collection Runner.\n\n**Order matters:** the requests form one journey. Register a customer → log in → use the account → delete it. Later requests rely on the session cookie saved by the login request, so run the whole collection, not single requests.\n\n**Cookies:** Newman (like Postman) keeps a cookie jar for the whole run, so after logging in every request automatically sends the session cookie. Requests that must be made logged-out switch cookies off for themselves (see each request's Settings → \"Disable cookie jar\", stored as `protocolProfileBehavior.disableCookies`).\n\n**Clean-up:** the journey ends by deleting the test customer, so a successful run leaves the database exactly as it was. Each run uses a unique email (`e2e.<timestamp>@example.invalid`; `.invalid` is a domain reserved for testing that can never be a real address), so if a run ever stops halfway, the leftover customer can't block the next run.\n\n**Variables** (collection variables, see the Variables tab):\n- `baseUrl`: where the server is running. Override with `--env-var baseUrl=...`.\n- `testEmail`, `testPassword`: the test customer's login details (`testEmail` is set fresh by the first request).\n- `customerId`: the test customer's id, saved after registration.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "description": "Where the API is running. Every request URL starts with {{baseUrl}}."
+    },
+    {
+      "key": "testEmail",
+      "value": "",
+      "description": "Set by the 'Register a test customer' pre-request script to a unique address for each run."
+    },
+    {
+      "key": "testPassword",
+      "value": "e2e-test-password",
+      "description": "The test customer's password (at least 8 characters, as registration requires)."
+    },
+    {
+      "key": "customerId",
+      "value": "",
+      "description": "The test customer's id, saved from the registration response and checked by later requests."
+    }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// COLLECTION-LEVEL TEST: runs after EVERY request in this collection,",
+          "// in addition to that request's own tests.",
+          "//",
+          "// Security check: no response may ever contain a password or its hash.",
+          "// pm.response.text() is the raw response body as a string (empty for a 204).",
+          "pm.test('response never contains a password or password_hash', function () {",
+          "  const body = pm.response.text();",
+          "  // pm.expect(...) is Postman's assertion library (Chai). .to.not.include",
+          "  // fails the test if the text contains the given string anywhere.",
+          "  pm.expect(body).to.not.include('password_hash');",
+          "  // Look for the quoted JSON key \"password\", so error messages that merely",
+          "  // mention the word (e.g. 'email and password are required') don't count.",
+          "  pm.expect(body).to.not.include('\"password\"');",
+          "});"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Register and log in",
+      "description": "Creates a brand-new test customer and logs in as them. The login response sets the session cookie that the rest of the journey relies on.",
+      "item": [
+        {
+          "name": "Register a test customer",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// PRE-REQUEST SCRIPT: runs just BEFORE this request is sent.",
+                  "//",
+                  "// Give this run its own unique email, so it can never clash with a",
+                  "// customer left behind by an earlier run that stopped halfway.",
+                  "// Date.now() is the number of milliseconds since 1970, different every run.",
+                  "// .invalid is a domain reserved for testing: it can never be a real address.",
+                  "const email = `e2e.${Date.now()}@example.invalid`;",
+                  "",
+                  "// Collection variables can be used in any request as {{name}}.",
+                  "// The request body below uses {{testEmail}}, so set it here first.",
+                  "pm.collectionVariables.set('testEmail', email);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// TEST SCRIPT: runs just AFTER the response arrives.",
+                  "// Each pm.test(name, fn) is one named check; if anything inside fn",
+                  "// throws (e.g. a failed pm.expect), that check fails.",
+                  "",
+                  "// 201 Created means the account was made.",
+                  "pm.test('status is 201 Created', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('returns the new customer with a numeric id and the normalised email', function () {",
+                  "  // pm.response.json() parses the body from JSON into a JavaScript object.",
+                  "  // It's called INSIDE pm.test so that if there's no valid JSON (e.g. the",
+                  "  // server is down), this check fails cleanly instead of the whole script",
+                  "  // crashing.",
+                  "  const customer = pm.response.json();",
+                  "  // The id is chosen by the database, so just check its type.",
+                  "  pm.expect(customer.id).to.be.a('number');",
+                  "  pm.expect(customer.first_name).to.equal('E2E');",
+                  "  pm.expect(customer.last_name).to.equal('Test');",
+                  "  pm.expect(customer.email).to.equal(pm.collectionVariables.get('testEmail'));",
+                  "",
+                  "  // Save the id so later requests can check they get the SAME customer back.",
+                  "  pm.collectionVariables.set('customerId', customer.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "description": "Tells Express the body is JSON, so express.json() parses it into req.body."
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"E2E\",\n  \"last_name\": \"Test\",\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/register",
+            "description": "POST /auth/register: creates the test customer. The pre-request script sets {{testEmail}} to a unique address first. Expects 201 Created and saves the new customer's id as {{customerId}}."
+          }
+        },
+        {
+          "name": "Log in",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 200 OK means the email and password matched.",
+                  "pm.test('status is 200 OK', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('returns the customer who just registered', function () {",
+                  "  // collectionVariables.get() returns the saved value as stored; Number()",
+                  "  // makes sure we compare a number with a number.",
+                  "  pm.expect(pm.response.json().id).to.equal(Number(pm.collectionVariables.get('customerId')));",
+                  "});",
+                  "",
+                  "// The server logs you in by setting a session cookie (named connect.sid",
+                  "// by express-session). pm.cookies holds the cookies from this response.",
+                  "pm.test('sets the session cookie', function () {",
+                  "  pm.expect(pm.cookies.has('connect.sid')).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/login",
+            "description": "POST /auth/login: logs in as the test customer. Newman stores the session cookie from this response and sends it with every following request (unless that request disables cookies)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Account",
+      "description": "Views and updates the logged-in customer's own account (GET and PUT /account), and checks the API refuses bad input and logged-out requests.",
+      "item": [
+        {
+          "name": "View account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 OK', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "// Check the exact shape of the response: these five fields and no others.",
+                  "// .to.have.all.keys() fails if any key is missing OR if there are extra keys.",
+                  "pm.test('returns exactly id, first_name, last_name, email and phone', function () {",
+                  "  pm.expect(pm.response.json()).to.have.all.keys('id', 'first_name', 'last_name', 'email', 'phone');",
+                  "});",
+                  "",
+                  "pm.test(\"returns the logged-in customer's details, with no phone yet\", function () {",
+                  "  const account = pm.response.json();",
+                  "  pm.expect(account.id).to.equal(Number(pm.collectionVariables.get('customerId')));",
+                  "  pm.expect(account.email).to.equal(pm.collectionVariables.get('testEmail'));",
+                  "  // The customer registered without a phone, so it's null.",
+                  "  pm.expect(account.phone).to.be.null;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/account",
+            "description": "GET /account: the logged-in customer's details. No id in the URL: the server knows who you are from the session cookie."
+          }
+        },
+        {
+          "name": "Update account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 OK', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('returns the updated details', function () {",
+                  "  const account = pm.response.json();",
+                  "  pm.expect(account.last_name).to.equal('Updated');",
+                  "  pm.expect(account.phone).to.equal('+44 20 7946 0000');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"E2E\",\n  \"last_name\": \"Updated\",\n  \"email\": \"{{testEmail}}\",\n  \"phone\": \"+44 20 7946 0000\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/account",
+            "description": "PUT /account: replaces the customer's details. PUT replaces everything, so first_name, last_name and email are all sent; this also adds a phone number."
+          }
+        },
+        {
+          "name": "View account again (were the changes saved?)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 OK', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "// A fresh GET proves the update was saved to the database,",
+                  "// not just echoed back in the PUT response.",
+                  "pm.test('returns the updated details from the database', function () {",
+                  "  const account = pm.response.json();",
+                  "  pm.expect(account.last_name).to.equal('Updated');",
+                  "  pm.expect(account.phone).to.equal('+44 20 7946 0000');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/account",
+            "description": "GET /account again: confirms the previous PUT really changed the stored details."
+          }
+        },
+        {
+          "name": "Update account with an invalid phone (rejected)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 400 Bad Request: phone numbers may only contain digits, spaces, +, - and brackets.",
+                  "pm.test('status is 400 Bad Request', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "// Every error response from this API has the shape { \"error\": \"...\" }.",
+                  "pm.test('explains the problem in an error message', function () {",
+                  "  pm.expect(pm.response.json().error).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"E2E\",\n  \"last_name\": \"Updated\",\n  \"email\": \"{{testEmail}}\",\n  \"phone\": \"020 CALL ME\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/account",
+            "description": "PUT /account with a phone number containing letters. Expects 400, and the account is left unchanged."
+          }
+        },
+        {
+          "name": "View account while logged out (refused)",
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// This request has cookies switched off (protocolProfileBehavior.disableCookies),",
+                  "// so it arrives WITHOUT the session cookie, like a stranger's request.",
+                  "// 401 Unauthorized means the API refused it.",
+                  "pm.test('status is 401 Unauthorized', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('explains the problem in an error message', function () {",
+                  "  pm.expect(pm.response.json().error).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/account",
+            "description": "GET /account with the cookie jar disabled for this request only, so no session cookie is sent. Expects 401."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Delete account (clean-up)",
+      "description": "Deletes the test customer, then proves the account and its session are really gone. This also cleans up, so a successful run leaves no test data behind.",
+      "item": [
+        {
+          "name": "Delete account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 204 No Content: deleted, with nothing to send back (the body is empty).",
+                  "pm.test('status is 204 No Content', function () {",
+                  "  pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/account",
+            "description": "DELETE /account: deletes the test customer and logs them out. Expects 204."
+          }
+        },
+        {
+          "name": "View account after deleting (refused)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cookies are ON for this request, so Newman still sends the old session",
+                  "// cookie. Deleting the account also logged it out, so this must fail.",
+                  "pm.test('status is 401 Unauthorized', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/account",
+            "description": "GET /account using the old session cookie. Expects 401: the deleted customer's session no longer works."
+          }
+        },
+        {
+          "name": "Log in to the deleted account (refused)",
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The customer no longer exists, so their old email and password fail.",
+                  "pm.test('status is 401 Unauthorized', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/login",
+            "description": "POST /auth/login with the deleted customer's details. Expects 401, proving the account is really gone from the database."
+          }
+        }
+      ]
+    }
+  ]
+}

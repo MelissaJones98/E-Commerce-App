@@ -56,7 +56,9 @@ e-commerce-app/
 │   │   ├── auth.login.test.js    # Tests for POST /auth/login and /auth/logout
 │   │   ├── products.test.js      # Tests for the /products routes
 │   │   ├── account.test.js       # Tests for the /account routes
-│   │   └── helpers.js      # Shared test helpers (e.g. emptying tables, logging in, adding test data)
+│   │   ├── helpers.js      # Shared test helpers (e.g. emptying tables, logging in, adding test data)
+│   │   └── e2e/            # End-to-end tests, run by Newman against the running server
+│   │       └── ecommerce-api.e2e.postman_collection.json
 │   ├── .env                # Your local settings (not committed, see below)
 │   ├── .env.test           # Test settings: test database name and a test-only session secret
 │   └── package.json
@@ -292,7 +294,19 @@ there's no customer id in the URL, so you can't reach anyone else's.
 | `409 Conflict` | The new email belongs to another account (PUT), or the account has orders and can't be deleted (DELETE) |
 
 ### 6. Run the tests
-The tests use a separate `ecommerce_test` database, so they never touch your real data.
+There are two kinds of automated test. Both are run from the `back-end` folder:
+
+| | Unit and integration tests | End-to-end (E2E) tests |
+|---|---|---|
+| **Command** | `npm test` | `npm run test:e2e` |
+| **Tool** | Node's test runner + Supertest | Newman (Postman's command-line runner) |
+| **Files** | `tests/*.test.js` | `tests/e2e/ecommerce-api.e2e.postman_collection.json` |
+| **Server** | Not needed: the tests load the app directly | Must be running (`npm run dev` or `npm start`) |
+| **Database** | `ecommerce_test`, emptied before every test | Your real `ecommerce` database |
+| **Checks** | Each route's behaviour in detail, including edge cases | One complete customer journey through the real running server |
+
+#### Unit and integration tests
+These tests use a separate `ecommerce_test` database, so they never touch your real data.
 `.env.test` switches the database name and provides a test-only `SESSION_SECRET`; all other
 connection details come from your `.env`.
 
@@ -313,6 +327,90 @@ Tests are written with Node's built-in test runner (`node:test`) and
 starting a server. Every table is emptied before each test, and the helper refuses to run on
 any database whose name doesn't end in `_test`.
 
+#### End-to-end tests with Newman
+End-to-end tests check the app the way a real client uses it. Requests go over the network to
+the **running server**, which reads and writes the **real database**. They're written as a
+Postman collection: a saved list of requests, each with JavaScript checks (`pm.test`) that run
+on its response. [Newman](https://github.com/postmanlabs/newman) is Postman's command-line tool
+for running a collection, so the same tests run from the terminal without opening the Postman
+app.
+
+Newman is installed as a dev dependency (in `devDependencies` in `package.json`), so
+`npm install` sets it up. There's nothing to install globally.
+
+**1. Start the server** in one terminal, from the `back-end` folder:
+```bash
+npm run dev
+```
+
+**2. Run the E2E tests** in a second terminal, also from the `back-end` folder:
+```bash
+npm run test:e2e
+```
+`npm run test:e2e` is a shortcut (defined in `"scripts"` in `package.json`) for:
+```bash
+newman run tests/e2e/ecommerce-api.e2e.postman_collection.json
+```
+`newman run <file>` sends every request in the collection, in order, and runs each one's
+checks. You can type the full command yourself with `npx newman run ...`. `npx` runs a tool
+installed in the project's `node_modules`.
+
+**What the collection does:** it walks through one customer's whole journey, in three folders:
+
+| Folder | Requests | Checks |
+|---|---|---|
+| 1. Register and log in | Register a new test customer, then log in | `201`, then `200` and a session cookie |
+| 2. Account | View, update, view again, an invalid update, a logged-out view | `200`, `200`, the update was saved, `400`, `401` |
+| 3. Delete account (clean-up) | Delete the account, then try to use it again | `204`, then `401` and `401` |
+
+After **every** request, a collection-level check also confirms the response never contains
+a `password` or `password_hash`.
+
+**What a passing run looks like:** Newman prints each request with a ✓ (`√` in Windows
+terminals) beside each passing check, then a summary table. A passing run has `0` in every row
+of the **failed** column:
+```
+┌─────────────────────────┬───────────────────┬──────────────────┐
+│                         │          executed │           failed │
+├─────────────────────────┼───────────────────┼──────────────────┤
+│                requests │                10 │                0 │
+│            test-scripts │                20 │                0 │
+│              assertions │                29 │                0 │
+└─────────────────────────┴───────────────────┴──────────────────┘
+```
+Newman exits with code `0` when everything passes and `1` when anything fails, so it can be
+used in automated pipelines (CI) later. If every request shows `connect ECONNREFUSED`, the
+server isn't running; start it with step 1.
+
+**Things to know:**
+- **It uses your real `ecommerce` database.** The journey creates a customer and deletes it at
+  the end, so a successful run leaves nothing behind. Each run uses a unique email
+  (`e2e.<timestamp>@example.invalid`). If a run stops halfway (e.g. the server crashes), one
+  leftover test customer may remain; it's easy to spot by its `@example.invalid` email, and it
+  won't affect the next run.
+- **Order matters.** Later requests rely on the session cookie from the login request. Newman
+  keeps cookies for the whole run, just like a browser. The two requests that must be sent
+  logged out switch cookies off for themselves.
+- **A different server address** can be used with `--env-var`, which overrides the collection's
+  `baseUrl` variable:
+  ```bash
+  npm run test:e2e -- --env-var baseUrl=http://localhost:4000
+  ```
+  The `--` tells npm to pass everything after it to Newman.
+- **In the Postman app:** choose **File → Import**, pick the collection file, then use **Run
+  collection**. Every request, folder and the collection itself has a description explaining
+  what it does, and every check is commented.
+- **Warnings you can ignore:**
+  - Newman prints `DeprecationWarning: fs.F_OK is deprecated` when it starts. This comes from
+    Newman's own code on newer Node.js versions and doesn't affect the results.
+  - `npm audit` reports vulnerabilities in packages Newman depends on. They affect only this
+    development tool, never the app itself (`npm audit --omit=dev` shows `0 vulnerabilities`),
+    and Newman only ever sends requests to your local server.
+
+**Adding more E2E tests:** add requests to the collection, either in the Postman app (then
+export it as **Collection v2.1** over the same file) or by editing the JSON. Keep them in
+journey order.
+
 ## Technologies
 - JavaScript
 - Git and GitHub
@@ -322,6 +420,8 @@ any database whose name doesn't end in `_test`.
 - HTML
 - CSS
 - React
+- Node.js test runner (`node:test`) and Supertest: unit and integration tests
+- Postman and Newman: end-to-end API tests
 
 ## Error Handling and Testing
 All errors are returned as JSON in the form `{ "error": "description of the problem" }`, with an
@@ -440,7 +540,15 @@ confirm it fails, then just enough code is added to make it pass. There are 137 
   customers never seeing or changing each other's accounts, ignoring fields like `password_hash`,
   taken emails, accounts with orders, and each type of invalid account detail above
 
-Every test runs against a real PostgreSQL test database, not mocks. See [Run the tests](#6-run-the-tests) for how to run them.
+Every test runs against a real PostgreSQL test database, not mocks.
+
+On top of these, an **end-to-end test collection** run by Newman (10 requests, 29 checks) takes
+one customer through registering, logging in, viewing and updating their account, and deleting
+it, using the real running server and database. It also checks that no response ever contains
+a password. It has been confirmed to fail (exit code `1`) when the server isn't running, so a
+broken server can't produce a passing run.
+
+See [Run the tests](#6-run-the-tests) for how to run both.
 
 ## Future Work
 - Enable users to rate and review products
