@@ -14,7 +14,7 @@ database tables:
 | Products | Items for sale, browsable by anyone | `products`, `categories` |
 | Account | The logged-in customer's own details | `customers` |
 | Addresses | The logged-in customer's saved addresses | `addresses` |
-| Cart | Products the customer intends to buy | `cart_items` *(new, see [Schema changes needed](#schema-changes-needed))* |
+| Cart | Products the customer intends to buy | `cart_items` |
 | Orders | Completed purchases and order history | `orders`, `order_items` |
 
 ## Conventions
@@ -194,19 +194,35 @@ this (`ON DELETE RESTRICT`) to keep order history intact.
 | `DELETE` | `/cart` | Customer | Empty your cart | `204` |
 | `POST` | `/cart/checkout` | Customer | Place an order from your cart | `201` |
 
-`POST /cart/items` request: `{ "product_id": 7, "quantity": 2 }`.
-If the product is already in the cart, the quantities are added together.
-Errors: `400` quantity under 1, `404` product doesn't exist or is inactive.
-
-`GET /cart` response:
+`GET /cart` response (items in the order they were added):
 ```json
 {
   "items": [
-    { "product_id": 7, "name": "Coffee Mug", "price": "8.50", "quantity": 2, "line_total": "17.00" }
+    { "product_id": 7, "sku": "MUG-001", "name": "Coffee Mug", "price": "8.50", "quantity": 2, "line_total": "17.00" }
   ],
   "total": "17.00"
 }
 ```
+- An empty cart is `{ "items": [], "total": "0.00" }`.
+- `price` is the product's **current** price. The cart stores no prices; they're frozen into
+  `order_items` at checkout.
+- Retired products are hidden from the cart and left out of `total`.
+
+`POST /cart/items` request: `{ "product_id": 7, "quantity": 2 }`. If the product is already in
+the cart, the quantities are added together. Returns `201` with the whole updated cart.
+
+`PUT /cart/items/:productId` request: `{ "quantity": 5 }`. **Replaces** the quantity (it doesn't
+add to it). Returns `200` with the whole updated cart.
+
+`DELETE /cart/items/:productId` removes one product; `DELETE /cart` empties the cart (`204` even
+if it was already empty).
+
+Errors:
+- `400`: `product_id` or `quantity` isn't a whole number of at least 1, or the id in the URL is
+  invalid. To remove an item, use `DELETE` rather than a quantity of 0.
+- `401`: not logged in.
+- `404`: the product doesn't exist or is retired (`POST`), or isn't in your cart (`PUT`, `DELETE`).
+- `409`: not enough stock. `POST` checks the quantity already in the cart plus the new quantity.
 
 `POST /cart/checkout` request: `{ "shipping_address_id": 3 }`.
 In a single database transaction, it:
@@ -244,35 +260,11 @@ so every order goes through the stock and price checks.
 ```
 An `:orderId` belonging to another customer returns `404`.
 
-## Schema changes needed
-
-The README lists **carts** as a feature, but the current schema has no table for
-them. The simplest design is one cart per customer, stored as a single table:
-
-```sql
-CREATE TABLE cart_items (
-  customer_id integer NOT NULL REFERENCES customers (id) ON DELETE CASCADE,
-  product_id  integer NOT NULL REFERENCES products (id) ON DELETE CASCADE,
-  quantity    integer NOT NULL CHECK (quantity > 0),
-  added_at    timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (customer_id, product_id)
-);
-```
-
-- **No separate `carts` table.** Each customer only ever has one cart, so the
-  customer's ID identifies it.
-- **No `price` column.** The cart always shows the current price; the price is only
-  frozen into `order_items` at checkout.
-- **`ON DELETE CASCADE` on both foreign keys.** Unlike orders, a cart is temporary,
-  so it doesn't need protecting from deletes.
-
-Add this to `schema.sql` and the ERD before building the cart endpoints.
-
 ## Suggested build order
 
 1. **Products** (`GET` routes): public, so they can be built and tested in Postman before login exists
 2. **Auth**: register, log in, log out (with sessions and password hashing)
 3. **Account and Addresses**
-4. **Cart**: after adding the `cart_items` table
+4. **Cart**: built, using the `cart_items` table (see the database design)
 5. **Checkout and Orders**
 6. **Google sign-in, Stripe**: in their own later tickets

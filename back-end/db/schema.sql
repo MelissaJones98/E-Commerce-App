@@ -151,6 +151,36 @@ CREATE TRIGGER products_set_updated_at
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ---------------------------------------------------------------------------
+-- cart_items (each customer's shopping cart)
+-- ---------------------------------------------------------------------------
+-- Each row means "this customer wants this many of this product".
+-- There's no separate carts table: every customer has exactly one cart, so
+-- the customer's id is all that's needed to identify it.
+-- There's deliberately no price column. The cart always shows the product's
+-- CURRENT price; the price is only copied and frozen (into
+-- order_items.unit_price) when the customer checks out.
+
+CREATE TABLE cart_items (
+  -- ON DELETE CASCADE on both: a cart is temporary, so if the customer or
+  -- product is deleted, their cart rows simply go too (unlike orders, which
+  -- are protected with RESTRICT).
+  customer_id integer     NOT NULL REFERENCES customers (id) ON DELETE CASCADE,
+  product_id  integer     NOT NULL REFERENCES products (id) ON DELETE CASCADE,
+  -- CHECK (quantity > 0): an item with 0 is removed from the cart instead.
+  quantity    integer     NOT NULL CHECK (quantity > 0),
+  -- When the product was first added, so the cart lists items in that order.
+  added_at    timestamptz NOT NULL DEFAULT now(),
+  -- Composite primary key: each product appears at most once per cart.
+  -- Adding it again increases the quantity rather than adding a second row.
+  PRIMARY KEY (customer_id, product_id)
+);
+
+-- The primary key already indexes lookups by customer_id (its first column),
+-- which is how carts are read. This index speeds up the reverse: "which carts
+-- contain product 7?", which is also used by ON DELETE CASCADE.
+CREATE INDEX cart_items_product_id_idx ON cart_items (product_id);
+
+-- ---------------------------------------------------------------------------
 -- orders
 -- ---------------------------------------------------------------------------
 

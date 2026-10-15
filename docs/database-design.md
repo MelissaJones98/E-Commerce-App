@@ -12,6 +12,8 @@ erDiagram
     ORDERS ||--|{ ORDER_ITEMS : "contains"
     PRODUCTS ||--o{ ORDER_ITEMS : "appears in"
     CATEGORIES |o--o{ PRODUCTS : "groups"
+    CUSTOMERS ||--o{ CART_ITEMS : "has in cart"
+    PRODUCTS ||--o{ CART_ITEMS : "is in"
 
     CUSTOMERS {
         int id PK
@@ -63,6 +65,13 @@ erDiagram
         decimal total_amount
         timestamptz created_at
         timestamptz updated_at
+    }
+
+    CART_ITEMS {
+        int customer_id PK, FK
+        int product_id PK, FK
+        int quantity
+        timestamptz added_at
     }
 
     ORDER_ITEMS {
@@ -130,6 +139,7 @@ circle + crow's foot at the ORDERS end.
 | Address → Orders | One address can be used for many orders | `orders.shipping_address_id` |
 | Order ↔ Products | Many-to-many: an order holds many products, a product appears in many orders | `order_items` join table |
 | Category → Products | One category groups zero or many products; a product is in zero or one category | `products.category_id` (nullable) |
+| Customer ↔ Products (cart) | Many-to-many: a customer's cart holds many products, a product can be in many carts | `cart_items` join table |
 
 `order_items` isn't in the ticket's table list, but it's required: an order can't
 hold a list of products in a single column, so each line of an order (product +
@@ -210,6 +220,15 @@ quantity) gets its own row.
 | quantity | integer | NOT NULL, CHECK `quantity > 0` |
 | unit_price | numeric(10,2) | NOT NULL, CHECK `unit_price >= 0` |
 
+### cart_items
+
+| Column | Type | Constraints |
+|---|---|---|
+| customer_id | integer | PK (composite), FK → `customers.id`, ON DELETE CASCADE |
+| product_id | integer | PK (composite), FK → `products.id`, ON DELETE CASCADE |
+| quantity | integer | NOT NULL, CHECK `quantity > 0` |
+| added_at | timestamptz | NOT NULL, default `now()` |
+
 ## Design decisions
 
 - **Money uses `numeric(10,2)`, not `float`.** Floating-point types can't represent
@@ -231,9 +250,19 @@ quantity) gets its own row.
 - **A product has at most one category, and categories are optional.** Deleting a
   category doesn't delete its products: `ON DELETE SET NULL` makes them uncategorised.
   Unlike orders, nothing important is lost when a category goes.
+- **Each customer has one cart, stored as `cart_items` rows.** There's no separate
+  `carts` table: the customer's id identifies their cart. The composite primary key
+  `(customer_id, product_id)` means each product appears once per cart, and adding it
+  again raises the quantity.
+- **The cart stores no price.** It always shows each product's current price. At
+  checkout, each cart row is copied into `order_items` with the price at that moment,
+  which freezes it for the order's history, and the cart is emptied. Retired products
+  are hidden from the cart and left out of its total.
+- **Carts are temporary, so they use `ON DELETE CASCADE`.** Deleting a customer or
+  product deletes the matching cart rows, unlike orders, which are protected with
+  `RESTRICT`.
 
 ## Possible later additions
 
-- `carts` / `cart_items` tables, so a basket persists between sessions before checkout
 - `billing_address_id` on `orders`, once payments are added
 - A `product_categories` join table, if products ever need to be in more than one category

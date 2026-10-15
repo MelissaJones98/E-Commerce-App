@@ -19,6 +19,7 @@ import passport from './config/passport.js';
 import authRouter from './routes/auth.js';
 import productsRouter from './routes/products.js';
 import accountRouter from './routes/account.js';
+import cartRouter from './routes/cart.js';
 
 // `process.env` holds environment variables: settings that come from outside
 // the code, here from back-end/.env (loaded by the --env-file flag in the
@@ -78,6 +79,7 @@ app.use(passport.session());
 app.use('/auth', authRouter);
 app.use('/products', productsRouter);
 app.use('/account', accountRouter);
+app.use('/cart', cartRouter);
 
 // GET /: a simple test route. app.get() handles GET requests to a path.
 // The function receives `req` (the incoming request; unused here) and `res`

@@ -23,7 +23,7 @@ export const resetTables = async () => {
   //   RESTART IDENTITY  resets the automatic id numbering back to 1
   //   CASCADE           also empties any table that refers to these ones
   await pool.query(
-    'TRUNCATE customers, addresses, categories, products, orders, order_items RESTART IDENTITY CASCADE'
+    'TRUNCATE customers, addresses, categories, products, cart_items, orders, order_items RESTART IDENTITY CASCADE'
   );
 };
 
