@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",
     "dev": "node --env-file-if-exists=.env --watch server.js",
+    "start:test": "node --env-file-if-exists=.env --env-file=.env.test server.js",
     "test": "node --env-file-if-exists=.env --env-file=.env.test --test --test-concurrency=1",
     "test:e2e": "newman run tests/e2e/ecommerce-api.e2e.postman_collection.json",
     "db:test:reset": "node --env-file-if-exists=.env --env-file=.env.test db/reset-test-db.js"

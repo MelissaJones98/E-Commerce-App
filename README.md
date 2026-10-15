@@ -38,7 +38,10 @@ e-commerce-app/
 │   │   ├── auth.js         # /auth routes (register, login, logout)
 │   │   ├── products.js     # /products routes (browse, create, update, retire)
 │   │   ├── account.js      # /account routes (view, update, delete your own account)
-│   │   └── cart.js         # /cart routes (view, add to, change, remove from, empty your cart)
+│   │   ├── cart.js         # /cart routes (view, add to, change, remove from, empty your cart)
+│   │   └── checkout.js     # POST /cart/checkout (turn the cart into a paid order)
+│   ├── services/
+│   │   └── payment-processor.js # FAKE payment processor (stands in for Stripe)
 │   ├── config/
 │   │   └── passport.js     # Passport.js setup: checks logins, remembers who's logged in
 │   ├── middleware/
@@ -46,7 +49,8 @@ e-commerce-app/
 │   ├── utils/
 │   │   ├── normalize-email.js # Trims and lower-cases emails (shared by register, login and account)
 │   │   ├── parse-id.js     # Checks an id from a URL is a valid whole number
-│   │   └── validate-customer.js # Name, email and phone rules (shared by register and account)
+│   │   ├── validate-customer.js # Name, email and phone rules (shared by register and account)
+│   │   └── validate-checkout.js # Shipping address and payment card rules (incl. the Luhn check)
 │   ├── db/
 │   │   ├── index.js        # PostgreSQL connection pool and query helper
 │   │   ├── schema.sql      # Creates the database tables (for a new database)
@@ -60,6 +64,7 @@ e-commerce-app/
 │   │   ├── products.test.js      # Tests for the /products routes
 │   │   ├── account.test.js       # Tests for the /account routes
 │   │   ├── cart.test.js          # Tests for the /cart routes
+│   │   ├── checkout.test.js      # Tests for POST /cart/checkout
 │   │   ├── helpers.js      # Shared test helpers (e.g. emptying tables, logging in, adding test data)
 │   │   └── e2e/            # End-to-end tests, run by Newman against the running server
 │   │       └── ecommerce-api.e2e.postman_collection.json
@@ -163,6 +168,7 @@ npm start      # runs without auto-restart
 | `PUT /cart/items/:productId` | Changes how many of a product are in your cart (must be logged in) |
 | `DELETE /cart/items/:productId` | Removes a product from your cart (must be logged in) |
 | `DELETE /cart` | Empties your cart (must be logged in) |
+| `POST /cart/checkout` | Pays for your cart and turns it into an order (must be logged in) |
 
 Visit http://localhost:3000/health in your browser to test it.
 
@@ -346,6 +352,81 @@ Adding and changing both return the whole updated cart, so you can see the new t
 | `404 Not Found` | The product doesn't exist or is retired (POST), or isn't in your cart (PUT, DELETE) |
 | `409 Conflict` | Not enough stock. When adding, the quantity already in your cart counts too |
 
+#### Check out
+Log in and add products to your cart first (see above). Then send a **POST** to
+`http://localhost:3000/cart/checkout` with **Body → raw → JSON**:
+```json
+{
+  "shipping_address": {
+    "line_1": "10 Downing Street",
+    "line_2": null,
+    "city": "London",
+    "region": null,
+    "postal_code": "SW1A 2AA",
+    "country_code": "GB"
+  },
+  "payment": {
+    "cardholder_name": "Ada Lovelace",
+    "card_number": "4242 4242 4242 4242",
+    "expiry_month": 12,
+    "expiry_year": 2030,
+    "cvc": "123"
+  }
+}
+```
+- **`shipping_address`**: where the order is sent. `line_2` and `region` are optional. It's saved
+  as one of your addresses. (There are no routes for managing saved addresses yet, so you send it
+  with each order.)
+- **`payment`**: the card to charge. `card_number` and `cvc` are strings; the card number can
+  include spaces or hyphens.
+
+**No real money moves.** Payments go through a **fake payment processor**
+(`services/payment-processor.js`) that copies [Stripe's test cards](https://docs.stripe.com/testing),
+so you can try every outcome:
+
+| Card number | What happens |
+|---|---|
+| `4242 4242 4242 4242` | The payment succeeds (as does any other valid card number) |
+| `4000 0000 0000 0002` | The card is declined: `402` |
+| `4000 0000 0000 0119` | The payment processor fails: `502` |
+
+When real payments (Stripe) are added in a later ticket, only that one file should need replacing.
+
+**What a successful checkout does**, all in one database transaction:
+1. Saves the shipping address.
+2. Creates the order with status `paid`.
+3. Copies each cart item into the order with its current price. That **freezes** the price, so
+   later price changes don't alter the order.
+4. Reduces each product's stock.
+5. Empties your cart.
+
+If anything fails part-way, none of it happens: a declined card leaves your cart, the stock and
+your orders exactly as they were, so you can try another card. Card details are never stored or
+sent back.
+
+The response is the new order:
+```json
+{
+  "id": 1,
+  "status": "paid",
+  "total_amount": "17.00",
+  "created_at": "2026-10-15T09:36:52.487Z",
+  "shipping_address": { "id": 1, "line_1": "10 Downing Street", "line_2": null, "city": "London", "region": null, "postal_code": "SW1A 2AA", "country_code": "GB" },
+  "items": [
+    { "product_id": 1, "sku": "MUG-001", "name": "Coffee Mug", "quantity": 2, "unit_price": "8.50", "line_total": "17.00" }
+  ]
+}
+```
+
+| Response | When |
+|---|---|
+| `201 Created` | Payment succeeded; returns the new order |
+| `400 Bad Request` | The address or payment details are invalid (e.g. a mistyped card number or an expired card), or your cart is empty |
+| `401 Unauthorized` | You aren't logged in |
+| `402 Payment Required` | The card was declined |
+| `409 Conflict` | A product in your cart no longer has enough stock |
+| `502 Bad Gateway` | The payment processor failed; nothing was charged |
+
 ### 6. Run the tests
 There are two kinds of automated test. Both are run from the `back-end` folder:
 
@@ -354,8 +435,8 @@ There are two kinds of automated test. Both are run from the `back-end` folder:
 | **Command** | `npm test` | `npm run test:e2e` |
 | **Tool** | Node's test runner + Supertest | Newman (Postman's command-line runner) |
 | **Files** | `tests/*.test.js` | `tests/e2e/ecommerce-api.e2e.postman_collection.json` |
-| **Server** | Not needed: the tests load the app directly | Must be running (`npm run dev` or `npm start`) |
-| **Database** | `ecommerce_test`, emptied before every test | Your real `ecommerce` database |
+| **Server** | Not needed: the tests load the app directly | Must be running, started with `npm run start:test` |
+| **Database** | `ecommerce_test`, emptied before every test | `ecommerce_test` too (via `npm run start:test`) |
 | **Checks** | Each route's behaviour in detail, including edge cases | One complete customer journey through the real running server |
 
 #### Unit and integration tests
@@ -382,7 +463,7 @@ any database whose name doesn't end in `_test`.
 
 #### End-to-end tests with Newman
 End-to-end tests check the app the way a real client uses it. Requests go over the network to
-the **running server**, which reads and writes the **real database**. They're written as a
+the **running server**, which reads and writes a **real PostgreSQL database**. They're written as a
 Postman collection: a saved list of requests, each with JavaScript checks (`pm.test`) that run
 on its response. [Newman](https://github.com/postmanlabs/newman) is Postman's command-line tool
 for running a collection, so the same tests run from the terminal without opening the Postman
@@ -391,10 +472,24 @@ app.
 Newman is installed as a dev dependency (in `devDependencies` in `package.json`), so
 `npm install` sets it up. There's nothing to install globally.
 
-**1. Start the server** in one terminal, from the `back-end` folder:
+**1. Start the server on the test database** in one terminal, from the `back-end` folder:
 ```bash
-npm run dev
+npm run start:test
 ```
+`npm run start:test` starts the server exactly like `npm start`, except it also loads
+`.env.test`. That's the same file `npm test` uses: it switches the database to
+`ecommerce_test`, leaving your real `ecommerce` database untouched. (The script is
+`node --env-file-if-exists=.env --env-file=.env.test server.js`. Settings in the second file
+replace matching ones from the first.)
+
+**Why not your real database?** The checkout tests place an order, and orders are permanent
+history: the customer and product on an order can never be deleted (see the database design).
+So a run can't fully clean up after itself. The test database is wiped by `npm test` and
+`npm run db:test:reset`, so anything left there doesn't matter. If the test database doesn't
+exist yet, create it first with `npm run db:test:reset`.
+
+To check the server is on the right database, visit http://localhost:3000/health: it should say
+`"database":"ecommerce_test"`.
 
 **2. Run the E2E tests** in a second terminal, also from the `back-end` folder:
 ```bash
@@ -408,7 +503,7 @@ newman run tests/e2e/ecommerce-api.e2e.postman_collection.json
 checks. You can type the full command yourself with `npx newman run ...`. `npx` runs a tool
 installed in the project's `node_modules`.
 
-**What the collection does:** it walks through one customer's whole journey, in four folders:
+**What the collection does:** it walks through a shop's whole journey, in five folders:
 
 | Folder | Requests | Checks |
 |---|---|---|
@@ -416,6 +511,7 @@ installed in the project's `node_modules`.
 | 2. Account | View, update, view again, an invalid update, a logged-out view | `200`, `200`, the update was saved, `400`, `401` |
 | 3. Cart | Create a test product (8.50, 5 in stock); view the empty cart; add 2; add 1 more; try to add 3 more; change the quantity to 1; remove it; remove it again; add it back; empty the cart; view it; view it logged out; retire the product | `201`; empty cart; total `17.00`; quantities added together to 3, total `25.50`; `409` (6 > 5 in stock); total `8.50`; `204`; `404`; `201`; `204`; empty cart; `401`; `204` |
 | 4. Delete account (clean-up) | Delete the account, then try to use it again | `204`, then `401` and `401` |
+| 5. Checkout | Register and log in a second customer; create a product (8.50, 5 in stock); add 2 to the cart; check out with a mistyped card, then a declined card; view the cart; check out successfully; view the cart and the product's stock; check out the empty cart; check out logged out; try to delete the account | `201`, `200`, `201`, total `17.00`; `400`, `402`; cart still holds 2; `201` paid order for `17.00` with the card number never sent back; empty cart, stock down to 3; `400`; `401`; `409` (order history is protected) |
 
 After **every** request, a collection-level check also confirms the response never contains
 a `password` or `password_hash`.
@@ -427,9 +523,9 @@ of the **failed** column:
 ┌─────────────────────────┬───────────────────┬──────────────────┐
 │                         │          executed │           failed │
 ├─────────────────────────┼───────────────────┼──────────────────┤
-│                requests │                23 │                0 │
-│            test-scripts │                46 │                0 │
-│              assertions │                62 │                0 │
+│                requests │                36 │                0 │
+│            test-scripts │                72 │                0 │
+│              assertions │                98 │                0 │
 └─────────────────────────┴───────────────────┴──────────────────┘
 ```
 Newman exits with code `0` when everything passes and `1` when anything fails, so it can be
@@ -437,23 +533,18 @@ used in automated pipelines (CI) later. If every request shows `connect ECONNREF
 server isn't running; start it with step 1.
 
 **Things to know:**
-- **It uses your real `ecommerce` database,** so that database must be fully migrated (see
-  "Updating an existing database" above); otherwise the product and cart requests fail with
-  `500`. The journey creates a test customer and a test product, then cleans up:
-  - **The customer is deleted** at the end, which also deletes anything in their cart.
-  - **The product is retired** (hidden from the shop), not deleted, because the API never fully
-    deletes products. So each successful run leaves **one retired product** behind, with an
-    SKU like `E2E-1760000000000` and the name "E2E Test Mug". It's invisible in the shop and
-    harmless. To remove these rows, run
-    `DELETE FROM products WHERE sku LIKE 'E2E-%' AND NOT is_active;` in pgAdmin. That works
-    as long as no order uses them, which the tests never do.
-  - **Each run uses a unique email and SKU** (both include the current time). If a run stops
-    halfway (e.g. the server crashes), a leftover test customer (`@example.invalid` email) or
-    active test product may remain, but it won't affect the next run.
-- **Order matters.** Later requests rely on the session cookie from the login request, and the
-  cart requests rely on the product created at the start of folder 3. Newman keeps cookies for
-  the whole run, just like a browser. The three requests that must be sent logged out switch
-  cookies off for themselves.
+- **What a run leaves in the test database:** the first customer is deleted and their test
+  product retired. The checkout customer, their order and address, and the product they bought
+  stay, because orders are permanent. That's harmless: `npm test` empties every table before
+  each test, and every E2E run uses unique emails and SKUs made from the current time, so
+  leftovers never clash with the next run.
+- **Order matters.** Later requests rely on the session cookie from the latest login, and the
+  cart and checkout requests rely on the product created at the start of their folder. Newman
+  keeps cookies for the whole run, just like a browser; logging in as the second customer in
+  folder 5 replaces the first customer's cookie. The four requests that must be sent logged out
+  switch cookies off for themselves.
+- **Don't run `npm test` at the same time.** Both use `ecommerce_test`, and `npm test` empties
+  its tables before every test, which would pull the data out from under a running E2E run.
 - **A different server address** can be used with `--env-var`, which overrides the collection's
   `baseUrl` variable:
   ```bash
@@ -501,6 +592,9 @@ Implemented error handling for:
 - Invalid cart details (`400`)
 - Product not found or not in the cart (`404`)
 - Not enough stock (`409`)
+- Invalid checkout details or an empty cart (`400`)
+- Declined payments (`402`)
+- Payment processor failures (`502`)
 - Failed logins (`400` / `401`)
 - Not logged in (`401`)
 - Malformed or missing request bodies (`400`)
@@ -589,6 +683,48 @@ it's compared with the stock directly. Asking for exactly the amount in stock is
 This check gives early feedback while shopping. Stock can change between adding to the cart
 and checking out, so it will be checked again when the order is placed.
 
+### Invalid checkout details or an empty cart: `400 Bad Request`
+`POST /cart/checkout` checks everything it can before touching the database or the payment
+processor, so obvious mistakes get a clear message straight away.
+
+**Shipping address:** `line_1`, `city`, `postal_code` and `country_code` are required, and
+`line_2` and `region` are optional text. Lengths match the `addresses` columns in
+`schema.sql`. `country_code` must be 2 letters (stored in capitals).
+
+**Payment details**, checked the way a real checkout would before charging:
+- **`cardholder_name`** is required.
+- **`card_number`** must be a **string**: as a JSON number, a 16-digit card number can lose
+  digits. Spaces and hyphens are allowed, it must be 12–19 digits, and it must pass the **Luhn
+  check**. That's a checksum every real card number passes: double every second digit from the
+  right (subtracting 9 from anything over 9), add up all the digits, and the total must be a
+  multiple of 10. It catches most typos, such as one wrong digit or two digits swapped.
+- **`expiry_month`** must be 1–12, and **`expiry_year`** a 4-digit year. The card mustn't have
+  expired. Cards are valid until the end of their expiry month, so one expiring this month is fine.
+- **`cvc`** must be a string of 3 or 4 digits. It's a string because codes can start with `0`,
+  which a JSON number would drop.
+
+**The cart** must hold at least one product currently in the shop. A cart that's empty, or holds
+only retired products, returns `400`.
+
+### Declined payments: `402 Payment Required`
+The request was fine, but the payment didn't go through: the fake processor declines the test
+card `4000 0000 0000 0002`. Because the payment happens inside the checkout's database
+transaction, the transaction is rolled back: no order is created, the stock isn't touched, and
+the cart is kept, so the customer can try a different card.
+
+### Payment processor failures: `502 Bad Gateway`
+`502` means a service this API relies on failed: here, the payment processor (the test card
+`4000 0000 0000 0119` simulates an outage). It's not the customer's fault and not a bug in this
+API, which is why it isn't a `500`. The fake processor throws its own `PaymentProcessorError` type
+so the route can tell this apart from unexpected bugs. As with a decline, everything is rolled
+back and nothing is charged.
+
+### Stock at checkout: `409 Conflict`
+Stock can change between adding to the cart and checking out, so checkout checks it again. It
+first **locks** the cart's product rows (`SELECT ... FOR UPDATE`), so if two customers try to buy
+the last item at the same moment, one waits until the other has finished. The first gets the
+item; the second gets `409`, never a negative stock count or a crash.
+
 ### Failed logins: `400 Bad Request` / `401 Unauthorized`
 `POST /auth/login` returns `400` if `email` or `password` is missing, and `401` if they don't
 match an account. A wrong password and an unknown email return exactly the same `401` message.
@@ -597,8 +733,8 @@ Different messages would let anyone check whether an email address has an accoun
 ### Not logged in: `401 Unauthorized`
 Routes that need a logged-in customer use the `requireAuth` middleware, which returns `401`
 before the route runs if there's no active session. `POST /auth/logout`, the product create,
-update and retire routes, and every `/account` and `/cart` route use it now, and the order
-routes will too.
+update and retire routes, and every `/account` and `/cart` route (including checkout) use it
+now, and the order routes will too.
 
 ### Malformed or missing request bodies: `400 Bad Request`
 A body that isn't valid JSON, or a request with no body at all, returns `400` instead of
@@ -615,7 +751,7 @@ errors can reveal how the app works internally.
 
 ### Testing
 The API is built using test-driven development (TDD): each test is written first and run to
-confirm it fails, then just enough code is added to make it pass. There are 183 tests:
+confirm it fails, then just enough code is added to make it pass. There are 238 tests:
 - **Registration (27):** successful registration, duplicate accounts (including simultaneous
   requests), and each type of invalid input above
 - **Login and logout (17):** successful login, staying logged in across requests, the `HttpOnly`
@@ -631,12 +767,18 @@ confirm it fails, then just enough code is added to make it pass. There are 183 
   added, current prices, retired products hidden and excluded from the total, quantities adding
   together, stock limits (including exactly the stock available), login being required,
   customers never seeing or changing each other's carts, and each type of invalid cart detail above
+- **Checkout (55):** the full paid order checked against hand-worked totals, the address saved,
+  prices frozen, stock reduced and the cart emptied, retired products left out, declined
+  payments and processor failures changing nothing, stock running out, two customers racing
+  for the last item, card details never sent back, and each type of invalid payment or address
+  detail above
 
 Every test runs against a real PostgreSQL test database, not mocks.
 
-On top of these, an **end-to-end test collection** run by Newman (23 requests, 62 checks) takes
-one customer through registering, logging in, viewing and updating their account, filling,
-changing and emptying their cart, and deleting their account, using the real running server and
+On top of these, an **end-to-end test collection** run by Newman (36 requests, 98 checks) takes
+customers through registering, logging in, viewing and updating their account, filling,
+changing and emptying their cart, deleting their account, and checking out (including a
+mistyped card and a declined payment), using the real running server and the test
 database. It also checks that no response ever contains
 a password. It has been confirmed to fail (exit code `1`) when the server isn't running, so a
 broken server can't produce a passing run.
