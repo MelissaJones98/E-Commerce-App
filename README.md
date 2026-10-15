@@ -21,8 +21,9 @@ browsing products, and completing a purchase.
 - Deploy the application using Render
 
 ## Database
-The database has six tables: `customers`, `addresses`, `categories`, `products`, `orders`, and
-`order_items` (a join table linking orders to the products they contain).
+The database has seven tables: `customers`, `addresses`, `categories`, `products`, `cart_items`,
+`orders`, and `order_items`. `cart_items` holds each customer's shopping cart (one row per
+product in it), and `order_items` links each order to the products it contains.
 
 The full design, including the Entity Relationship Diagram, column types, relationships, and the
 reasoning behind each design decision, is in [docs/database-design.md](docs/database-design.md).
@@ -36,7 +37,8 @@ e-commerce-app/
 │   ├── routes/
 │   │   ├── auth.js         # /auth routes (register, login, logout)
 │   │   ├── products.js     # /products routes (browse, create, update, retire)
-│   │   └── account.js      # /account routes (view, update, delete your own account)
+│   │   ├── account.js      # /account routes (view, update, delete your own account)
+│   │   └── cart.js         # /cart routes (view, add to, change, remove from, empty your cart)
 │   ├── config/
 │   │   └── passport.js     # Passport.js setup: checks logins, remembers who's logged in
 │   ├── middleware/
@@ -49,13 +51,15 @@ e-commerce-app/
 │   │   ├── index.js        # PostgreSQL connection pool and query helper
 │   │   ├── schema.sql      # Creates the database tables (for a new database)
 │   │   ├── migrations/     # Updates an existing database to match schema.sql
-│   │   │   └── 001-add-categories.sql
+│   │   │   ├── 001-add-categories.sql
+│   │   │   └── 002-add-cart-items.sql
 │   │   └── reset-test-db.js # Rebuilds the test database from schema.sql
 │   ├── tests/
 │   │   ├── auth.register.test.js # Tests for POST /auth/register
 │   │   ├── auth.login.test.js    # Tests for POST /auth/login and /auth/logout
 │   │   ├── products.test.js      # Tests for the /products routes
 │   │   ├── account.test.js       # Tests for the /account routes
+│   │   ├── cart.test.js          # Tests for the /cart routes
 │   │   ├── helpers.js      # Shared test helpers (e.g. emptying tables, logging in, adding test data)
 │   │   └── e2e/            # End-to-end tests, run by Newman against the running server
 │   │       └── ecommerce-api.e2e.postman_collection.json
@@ -86,7 +90,7 @@ Using **pgAdmin 4**:
 1. Right-click **Databases → Create → Database…**, name it `ecommerce`, and click **Save**.
 2. Select the `ecommerce` database, open **Tools → Query Tool**, and check the tab title starts with `ecommerce/`.
 3. Open `back-end/db/schema.sql`, then click **Execute** (or press F5).
-4. Refresh the database: `addresses`, `categories`, `customers`, `order_items`, `orders`, and `products` appear under **Schemas → public → Tables**.
+4. Refresh the database: `addresses`, `cart_items`, `categories`, `customers`, `order_items`, `orders`, and `products` appear under **Schemas → public → Tables**.
 
 Or using **psql** from the project root:
 ```bash
@@ -103,6 +107,10 @@ above (pgAdmin Query Tool → open file → Execute):
 | Migration | What it changes |
 |---|---|
 | `001-add-categories.sql` | Adds the `categories` table and `products.category_id` |
+| `002-add-cart-items.sql` | Adds the `cart_items` table (shopping carts) |
+
+To check which migrations a database already has, refresh it in pgAdmin and look under
+**Schemas → public → Tables**: `categories` means 001 has run, and `cart_items` means 002 has run.
 
 Each migration runs once. Running one again fails with an error (e.g. "relation already exists")
 and changes nothing, because each runs inside a transaction.
@@ -150,6 +158,11 @@ npm start      # runs without auto-restart
 | `GET /account` | Gets your own account details (must be logged in) |
 | `PUT /account` | Replaces your name, email and phone (must be logged in) |
 | `DELETE /account` | Deletes your account and logs you out (must be logged in) |
+| `GET /cart` | Gets your cart: items, line totals and the cart total (must be logged in) |
+| `POST /cart/items` | Adds a product to your cart (must be logged in) |
+| `PUT /cart/items/:productId` | Changes how many of a product are in your cart (must be logged in) |
+| `DELETE /cart/items/:productId` | Removes a product from your cart (must be logged in) |
+| `DELETE /cart` | Empties your cart (must be logged in) |
 
 Visit http://localhost:3000/health in your browser to test it.
 
@@ -293,6 +306,46 @@ there's no customer id in the URL, so you can't reach anyone else's.
 | `401 Unauthorized` | You aren't logged in |
 | `409 Conflict` | The new email belongs to another account (PUT), or the account has orders and can't be deleted (DELETE) |
 
+#### Your cart
+Log in first (see above). Each customer has one cart, and these routes only ever work on your
+own. The cart is saved in the database, so it's still there after logging out and back in.
+
+- **View:** send a **GET** to `http://localhost:3000/cart`:
+  ```json
+  {
+    "items": [
+      { "product_id": 1, "sku": "MUG-001", "name": "Coffee Mug", "price": "8.50", "quantity": 2, "line_total": "17.00" }
+    ],
+    "total": "17.00"
+  }
+  ```
+  Items are listed in the order you added them. `price` is always the product's **current**
+  price: the cart doesn't store prices, so a price change shows up straight away. (Prices are
+  only fixed when an order is placed.) Retired products are hidden and left out of `total`.
+  An empty cart is `{ "items": [], "total": "0.00" }`.
+- **Add a product:** send a **POST** to `http://localhost:3000/cart/items` with
+  **Body → raw → JSON**:
+  ```json
+  { "product_id": 1, "quantity": 2 }
+  ```
+  If the product is already in your cart, the quantities are **added together** (2 + 2 = 4).
+- **Change a quantity:** send a **PUT** to `http://localhost:3000/cart/items/1` (the product's id)
+  with `{ "quantity": 5 }`. This **replaces** the quantity rather than adding to it.
+- **Remove a product:** send a **DELETE** to `http://localhost:3000/cart/items/1`.
+- **Empty the cart:** send a **DELETE** to `http://localhost:3000/cart`.
+
+Adding and changing both return the whole updated cart, so you can see the new total straight away.
+
+| Response | When |
+|---|---|
+| `200 OK` | Cart returned (GET) or quantity changed (PUT) |
+| `201 Created` | Product added (POST) |
+| `204 No Content` | Product removed, or cart emptied (DELETE) |
+| `400 Bad Request` | `product_id` or `quantity` isn't a whole number of at least 1, or the id in the URL is invalid (to remove an item, use DELETE rather than a quantity of 0) |
+| `401 Unauthorized` | You aren't logged in |
+| `404 Not Found` | The product doesn't exist or is retired (POST), or isn't in your cart (PUT, DELETE) |
+| `409 Conflict` | Not enough stock. When adding, the quantity already in your cart counts too |
+
 ### 6. Run the tests
 There are two kinds of automated test. Both are run from the `back-end` folder:
 
@@ -355,13 +408,14 @@ newman run tests/e2e/ecommerce-api.e2e.postman_collection.json
 checks. You can type the full command yourself with `npx newman run ...`. `npx` runs a tool
 installed in the project's `node_modules`.
 
-**What the collection does:** it walks through one customer's whole journey, in three folders:
+**What the collection does:** it walks through one customer's whole journey, in four folders:
 
 | Folder | Requests | Checks |
 |---|---|---|
 | 1. Register and log in | Register a new test customer, then log in | `201`, then `200` and a session cookie |
 | 2. Account | View, update, view again, an invalid update, a logged-out view | `200`, `200`, the update was saved, `400`, `401` |
-| 3. Delete account (clean-up) | Delete the account, then try to use it again | `204`, then `401` and `401` |
+| 3. Cart | Create a test product (8.50, 5 in stock); view the empty cart; add 2; add 1 more; try to add 3 more; change the quantity to 1; remove it; remove it again; add it back; empty the cart; view it; view it logged out; retire the product | `201`; empty cart; total `17.00`; quantities added together to 3, total `25.50`; `409` (6 > 5 in stock); total `8.50`; `204`; `404`; `201`; `204`; empty cart; `401`; `204` |
+| 4. Delete account (clean-up) | Delete the account, then try to use it again | `204`, then `401` and `401` |
 
 After **every** request, a collection-level check also confirms the response never contains
 a `password` or `password_hash`.
@@ -373,9 +427,9 @@ of the **failed** column:
 ┌─────────────────────────┬───────────────────┬──────────────────┐
 │                         │          executed │           failed │
 ├─────────────────────────┼───────────────────┼──────────────────┤
-│                requests │                10 │                0 │
-│            test-scripts │                20 │                0 │
-│              assertions │                29 │                0 │
+│                requests │                23 │                0 │
+│            test-scripts │                46 │                0 │
+│              assertions │                62 │                0 │
 └─────────────────────────┴───────────────────┴──────────────────┘
 ```
 Newman exits with code `0` when everything passes and `1` when anything fails, so it can be
@@ -383,14 +437,23 @@ used in automated pipelines (CI) later. If every request shows `connect ECONNREF
 server isn't running; start it with step 1.
 
 **Things to know:**
-- **It uses your real `ecommerce` database.** The journey creates a customer and deletes it at
-  the end, so a successful run leaves nothing behind. Each run uses a unique email
-  (`e2e.<timestamp>@example.invalid`). If a run stops halfway (e.g. the server crashes), one
-  leftover test customer may remain; it's easy to spot by its `@example.invalid` email, and it
-  won't affect the next run.
-- **Order matters.** Later requests rely on the session cookie from the login request. Newman
-  keeps cookies for the whole run, just like a browser. The two requests that must be sent
-  logged out switch cookies off for themselves.
+- **It uses your real `ecommerce` database,** so that database must be fully migrated (see
+  "Updating an existing database" above); otherwise the product and cart requests fail with
+  `500`. The journey creates a test customer and a test product, then cleans up:
+  - **The customer is deleted** at the end, which also deletes anything in their cart.
+  - **The product is retired** (hidden from the shop), not deleted, because the API never fully
+    deletes products. So each successful run leaves **one retired product** behind, with an
+    SKU like `E2E-1760000000000` and the name "E2E Test Mug". It's invisible in the shop and
+    harmless. To remove these rows, run
+    `DELETE FROM products WHERE sku LIKE 'E2E-%' AND NOT is_active;` in pgAdmin. That works
+    as long as no order uses them, which the tests never do.
+  - **Each run uses a unique email and SKU** (both include the current time). If a run stops
+    halfway (e.g. the server crashes), a leftover test customer (`@example.invalid` email) or
+    active test product may remain, but it won't affect the next run.
+- **Order matters.** Later requests rely on the session cookie from the login request, and the
+  cart requests rely on the product created at the start of folder 3. Newman keeps cookies for
+  the whole run, just like a browser. The three requests that must be sent logged out switch
+  cookies off for themselves.
 - **A different server address** can be used with `--env-var`, which overrides the collection's
   `baseUrl` variable:
   ```bash
@@ -435,6 +498,9 @@ Implemented error handling for:
 - Duplicate product SKUs (`409`)
 - Invalid account details (`400`)
 - Account email already taken, or account has orders (`409`)
+- Invalid cart details (`400`)
+- Product not found or not in the cart (`404`)
+- Not enough stock (`409`)
 - Failed logins (`400` / `401`)
 - Not logged in (`401`)
 - Malformed or missing request bodies (`400`)
@@ -501,6 +567,28 @@ of up to 30 characters containing only digits, spaces, `+`, `-` and brackets.
   `ON DELETE RESTRICT`, so the database refuses the delete to keep order history intact. PostgreSQL
   reports this as error code `23001` (`restrict_violation`), which the route turns into a `409`.
 
+### Invalid cart details: `400 Bad Request`
+`POST /cart/items` needs a `product_id` and a `quantity`, and `PUT /cart/items/:productId` needs
+a `quantity`. Each must be a JSON whole number from 1 up to the largest PostgreSQL `integer`, so
+strings (`"2"`), decimals (`1.5`), `0` and negatives are all rejected. A quantity of `0` isn't
+used to remove an item; `DELETE /cart/items/:productId` does that. Ids in the URL are checked the
+same way as product ids.
+
+### Product not found or not in the cart: `404 Not Found`
+- **`POST /cart/items`** returns `404` if the product doesn't exist or has been retired: only
+  products currently in the shop can be added.
+- **`PUT` and `DELETE /cart/items/:productId`** return `404` if that product isn't in your cart.
+  Retired products are hidden from the cart, so they count as not in it.
+
+### Not enough stock: `409 Conflict`
+Asking for more of a product than is in stock returns `409`. When **adding**, the quantity
+already in your cart counts too: with 3 in the cart and 5 in stock, adding 3 more is refused
+(3 + 3 = 6). When **changing** a quantity with `PUT`, the new quantity replaces the old one, so
+it's compared with the stock directly. Asking for exactly the amount in stock is allowed.
+
+This check gives early feedback while shopping. Stock can change between adding to the cart
+and checking out, so it will be checked again when the order is placed.
+
 ### Failed logins: `400 Bad Request` / `401 Unauthorized`
 `POST /auth/login` returns `400` if `email` or `password` is missing, and `401` if they don't
 match an account. A wrong password and an unknown email return exactly the same `401` message.
@@ -509,8 +597,8 @@ Different messages would let anyone check whether an email address has an accoun
 ### Not logged in: `401 Unauthorized`
 Routes that need a logged-in customer use the `requireAuth` middleware, which returns `401`
 before the route runs if there's no active session. `POST /auth/logout`, the product create,
-update and retire routes, and every `/account` route use it now, and the cart and order routes
-will too.
+update and retire routes, and every `/account` and `/cart` route use it now, and the order
+routes will too.
 
 ### Malformed or missing request bodies: `400 Bad Request`
 A body that isn't valid JSON, or a request with no body at all, returns `400` instead of
@@ -527,7 +615,7 @@ errors can reveal how the app works internally.
 
 ### Testing
 The API is built using test-driven development (TDD): each test is written first and run to
-confirm it fails, then just enough code is added to make it pass. There are 137 tests:
+confirm it fails, then just enough code is added to make it pass. There are 183 tests:
 - **Registration (27):** successful registration, duplicate accounts (including simultaneous
   requests), and each type of invalid input above
 - **Login and logout (17):** successful login, staying logged in across requests, the `HttpOnly`
@@ -539,12 +627,17 @@ confirm it fails, then just enough code is added to make it pass. There are 137 
 - **Account (31):** viewing, updating and deleting your own account, login being required,
   customers never seeing or changing each other's accounts, ignoring fields like `password_hash`,
   taken emails, accounts with orders, and each type of invalid account detail above
+- **Cart (46):** line and cart totals checked against hand-worked values, items in the order
+  added, current prices, retired products hidden and excluded from the total, quantities adding
+  together, stock limits (including exactly the stock available), login being required,
+  customers never seeing or changing each other's carts, and each type of invalid cart detail above
 
 Every test runs against a real PostgreSQL test database, not mocks.
 
-On top of these, an **end-to-end test collection** run by Newman (10 requests, 29 checks) takes
-one customer through registering, logging in, viewing and updating their account, and deleting
-it, using the real running server and database. It also checks that no response ever contains
+On top of these, an **end-to-end test collection** run by Newman (23 requests, 62 checks) takes
+one customer through registering, logging in, viewing and updating their account, filling,
+changing and emptying their cart, and deleting their account, using the real running server and
+database. It also checks that no response ever contains
 a password. It has been confirmed to fail (exit code `1`) when the server isn't running, so a
 broken server can't produce a passing run.
 

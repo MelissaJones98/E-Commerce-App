@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "E-Commerce API: End-to-End Tests",
-    "description": "End-to-end (E2E) tests for the e-commerce API.\n\n**What \"end-to-end\" means here:** these requests go to the REAL running server (`npm run dev` or `npm start`), which talks to the REAL `ecommerce` database, the same way a browser or the Postman app would. That's different from the unit/integration tests in `tests/*.test.js` (run with `npm test`), which load the app directly in Node and use the separate `ecommerce_test` database.\n\n**How to run:** start the server, then from the `back-end` folder run `npm run test:e2e`. Newman (Postman's command-line runner) runs every request below, in order, top to bottom. You can also import this file into the Postman app (File → Import) and use its Collection Runner.\n\n**Order matters:** the requests form one journey. Register a customer → log in → use the account → delete it. Later requests rely on the session cookie saved by the login request, so run the whole collection, not single requests.\n\n**Cookies:** Newman (like Postman) keeps a cookie jar for the whole run, so after logging in every request automatically sends the session cookie. Requests that must be made logged-out switch cookies off for themselves (see each request's Settings → \"Disable cookie jar\", stored as `protocolProfileBehavior.disableCookies`).\n\n**Clean-up:** the journey ends by deleting the test customer, so a successful run leaves the database exactly as it was. Each run uses a unique email (`e2e.<timestamp>@example.invalid`; `.invalid` is a domain reserved for testing that can never be a real address), so if a run ever stops halfway, the leftover customer can't block the next run.\n\n**Variables** (collection variables, see the Variables tab):\n- `baseUrl`: where the server is running. Override with `--env-var baseUrl=...`.\n- `testEmail`, `testPassword`: the test customer's login details (`testEmail` is set fresh by the first request).\n- `customerId`: the test customer's id, saved after registration.",
+    "description": "End-to-end (E2E) tests for the e-commerce API.\n\n**What \"end-to-end\" means here:** these requests go to the REAL running server (`npm run dev` or `npm start`), which talks to the REAL `ecommerce` database, the same way a browser or the Postman app would. That's different from the unit/integration tests in `tests/*.test.js` (run with `npm test`), which load the app directly in Node and use the separate `ecommerce_test` database.\n\n**How to run:** start the server, then from the `back-end` folder run `npm run test:e2e`. Newman (Postman's command-line runner) runs every request below, in order, top to bottom. You can also import this file into the Postman app (File → Import) and use its Collection Runner.\n\n**Order matters:** the requests form one journey. Register a customer → log in → use the account → create a test product and use the cart → retire the product → delete the account. Later requests rely on the session cookie saved by the login request, so run the whole collection, not single requests.\n\n**Cookies:** Newman (like Postman) keeps a cookie jar for the whole run, so after logging in every request automatically sends the session cookie. Requests that must be made logged-out switch cookies off for themselves (see each request's Settings → \"Disable cookie jar\", stored as `protocolProfileBehavior.disableCookies`).\n\n**Clean-up:** the journey ends by retiring the test product and deleting the test customer (which also deletes their cart). The API never fully deletes products, because past orders may refer to them, so each successful run leaves exactly one retired, hidden product behind (SKU `E2E-<timestamp>`). Each run uses a unique email (`e2e.<timestamp>@example.invalid`; `.invalid` is a domain reserved for testing that can never be a real address), so if a run ever stops halfway, the leftover customer can't block the next run.\n\n**Variables** (collection variables, see the Variables tab):\n- `baseUrl`: where the server is running. Override with `--env-var baseUrl=...`.\n- `testEmail`, `testPassword`: the test customer's login details (`testEmail` is set fresh by the first request).\n- `customerId`: the test customer's id, saved after registration.\n- `testSku`, `productId`: the test product's unique SKU and id, used by the cart requests.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -24,6 +24,16 @@
       "key": "customerId",
       "value": "",
       "description": "The test customer's id, saved from the registration response and checked by later requests."
+    },
+    {
+      "key": "testSku",
+      "value": "",
+      "description": "Set by the 'Create a test product' pre-request script to a unique SKU (E2E-<timestamp>) for each run."
+    },
+    {
+      "key": "productId",
+      "value": "",
+      "description": "The test product's id, saved from the 'Create a test product' response and used by the cart requests."
     }
   ],
   "event": [
@@ -347,8 +357,426 @@
       ]
     },
     {
-      "name": "3. Delete account (clean-up)",
-      "description": "Deletes the test customer, then proves the account and its session are really gone. This also cleans up, so a successful run leaves no test data behind.",
+      "name": "3. Cart",
+      "description": "Creates a test product, then takes the logged-in customer's cart through every operation: view it empty, add the product, add more of it (quantities add together), try to add more than is in stock, change the quantity, remove it, add it back, empty the cart, and check a logged-out request is refused. Finally the test product is retired.\n\nThe test product has a unique SKU (`E2E-<timestamp>`), a price of 8.50 and 5 in stock, so every total below can be checked by hand.",
+      "item": [
+        {
+          "name": "Create a test product",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// PRE-REQUEST SCRIPT: runs just BEFORE this request is sent.",
+                  "//",
+                  "// Every product needs a unique SKU, so make one from the current time.",
+                  "// That way this run's product can never clash with one from an earlier run.",
+                  "pm.collectionVariables.set('testSku', `E2E-${Date.now()}`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 201 Created: the product was made. (Creating products needs a logged-in",
+                  "// customer, and Newman is still sending the session cookie from 'Log in'.)",
+                  "pm.test('status is 201 Created', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('returns the new product, with its price as a string', function () {",
+                  "  // Parse the JSON inside pm.test, so a bad response fails this check",
+                  "  // cleanly instead of crashing the script.",
+                  "  const product = pm.response.json();",
+                  "  pm.expect(product.sku).to.equal(pm.collectionVariables.get('testSku'));",
+                  "  // Prices are sent as numbers (8.5) but returned as strings ('8.50').",
+                  "  pm.expect(product.price).to.equal('8.50');",
+                  "  pm.expect(product.stock_quantity).to.equal(5);",
+                  "",
+                  "  // Save the id: the cart requests below use it as {{productId}}.",
+                  "  pm.collectionVariables.set('productId', product.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{testSku}}\",\n  \"name\": \"E2E Test Mug\",\n  \"description\": \"Created by the end-to-end tests and retired at the end of the run\",\n  \"price\": 8.5,\n  \"stock_quantity\": 5\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/products",
+            "description": "POST /products: creates a product for the cart tests to use, priced 8.50 with 5 in stock. Saves its id as {{productId}}."
+          }
+        },
+        {
+          "name": "View the empty cart",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 OK', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "// .to.deep.equal compares every property: no items, and a total of '0.00'.",
+                  "pm.test('the new customer starts with an empty cart', function () {",
+                  "  pm.expect(pm.response.json()).to.deep.equal({ items: [], total: '0.00' });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/cart",
+            "description": "GET /cart before anything has been added. Expects an empty cart with a total of 0.00."
+          }
+        },
+        {
+          "name": "Add 2 of the product to the cart",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201 Created', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "// The response is the whole updated cart.",
+                  "// Hand-checked: 2 x 8.50 = 17.00.",
+                  "pm.test('the cart holds 2 of the product, with a total of 17.00', function () {",
+                  "  const cart = pm.response.json();",
+                  "  pm.expect(cart.items).to.have.lengthOf(1);",
+                  "  pm.expect(cart.items[0].product_id).to.equal(Number(pm.collectionVariables.get('productId')));",
+                  "  pm.expect(cart.items[0].quantity).to.equal(2);",
+                  "  pm.expect(cart.items[0].line_total).to.equal('17.00');",
+                  "  pm.expect(cart.total).to.equal('17.00');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": {{productId}},\n  \"quantity\": 2\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/cart/items",
+            "description": "POST /cart/items with quantity 2. {{productId}} has no quotes around it in the body, so it's sent as a JSON number, which the API requires."
+          }
+        },
+        {
+          "name": "Add 1 more of the same product",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201 Created', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "// Adding a product that's already in the cart ADDS to its quantity",
+                  "// (2 + 1 = 3) instead of creating a second line.",
+                  "// Hand-checked: 3 x 8.50 = 25.50.",
+                  "pm.test('the quantities are added together into one line: 3, totalling 25.50', function () {",
+                  "  const cart = pm.response.json();",
+                  "  pm.expect(cart.items).to.have.lengthOf(1);",
+                  "  pm.expect(cart.items[0].quantity).to.equal(3);",
+                  "  pm.expect(cart.total).to.equal('25.50');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": {{productId}},\n  \"quantity\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/cart/items",
+            "description": "POST /cart/items again for the same product, with quantity 1. Expects one line with quantity 3."
+          }
+        },
+        {
+          "name": "Add more than is in stock (refused)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 3 already in the cart + 3 more = 6, but only 5 are in stock.",
+                  "// 409 Conflict: the request clashes with the stock level.",
+                  "pm.test('status is 409 Conflict', function () {",
+                  "  pm.response.to.have.status(409);",
+                  "});",
+                  "",
+                  "pm.test('explains the problem in an error message', function () {",
+                  "  pm.expect(pm.response.json().error).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": {{productId}},\n  \"quantity\": 3\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/cart/items",
+            "description": "POST /cart/items asking for 3 more when 3 are already in the cart and only 5 are in stock. Expects 409, with the cart unchanged."
+          }
+        },
+        {
+          "name": "Change the quantity to 1",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 OK', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "// PUT REPLACES the quantity (3 becomes 1), unlike POST, which adds.",
+                  "// This also proves the refused request above left the cart alone.",
+                  "pm.test('the quantity is replaced with 1, totalling 8.50', function () {",
+                  "  const cart = pm.response.json();",
+                  "  pm.expect(cart.items[0].quantity).to.equal(1);",
+                  "  pm.expect(cart.total).to.equal('8.50');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/cart/items/{{productId}}",
+            "description": "PUT /cart/items/:productId with quantity 1. The product's id goes in the URL; the body only holds the new quantity."
+          }
+        },
+        {
+          "name": "Remove the product from the cart",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 204 No Content: removed, with nothing to send back.",
+                  "pm.test('status is 204 No Content', function () {",
+                  "  pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/cart/items/{{productId}}",
+            "description": "DELETE /cart/items/:productId: removes the product from the cart."
+          }
+        },
+        {
+          "name": "Remove it again (not in the cart)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The product was just removed, so it's no longer in the cart.",
+                  "pm.test('status is 404 Not Found', function () {",
+                  "  pm.response.to.have.status(404);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/cart/items/{{productId}}",
+            "description": "DELETE /cart/items/:productId a second time. Expects 404, proving the first delete really removed it."
+          }
+        },
+        {
+          "name": "Add the product back",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Put something back in the cart, so the next request has a cart to empty.",
+                  "pm.test('status is 201 Created', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": {{productId}},\n  \"quantity\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/cart/items",
+            "description": "POST /cart/items with quantity 1, to give 'Empty the cart' something to empty."
+          }
+        },
+        {
+          "name": "Empty the cart",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204 No Content', function () {",
+                  "  pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/cart",
+            "description": "DELETE /cart: removes everything from the cart."
+          }
+        },
+        {
+          "name": "View the cart after emptying it",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 OK', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "// A fresh GET proves the cart really was emptied in the database.",
+                  "pm.test('the cart is empty again', function () {",
+                  "  pm.expect(pm.response.json()).to.deep.equal({ items: [], total: '0.00' });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/cart",
+            "description": "GET /cart after emptying it. Expects an empty cart."
+          }
+        },
+        {
+          "name": "View the cart while logged out (refused)",
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cookies are switched off for this request (protocolProfileBehavior.disableCookies),",
+                  "// so it arrives without the session cookie, like a stranger's request.",
+                  "pm.test('status is 401 Unauthorized', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/cart",
+            "description": "GET /cart with the cookie jar disabled for this request only. Expects 401."
+          }
+        },
+        {
+          "name": "Retire the test product (clean-up)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Retiring hides the product from the shop. The API never fully deletes",
+                  "// products (past orders may refer to them), so the row stays in the",
+                  "// database marked inactive.",
+                  "pm.test('status is 204 No Content', function () {",
+                  "  pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/products/{{productId}}",
+            "description": "DELETE /products/:productId: retires the test product so it no longer appears in the shop."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Delete account (clean-up)",
+      "description": "Deletes the test customer, then proves the account and its session are really gone. Deleting the account also deletes anything left in their cart (ON DELETE CASCADE).",
       "item": [
         {
           "name": "Delete account",
