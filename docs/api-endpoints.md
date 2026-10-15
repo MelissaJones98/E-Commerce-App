@@ -286,22 +286,34 @@ Real payments (Stripe) are added in a later ticket, replacing only the fake proc
 | `GET` | `/orders/:orderId` | Customer | One order with its items | `200` |
 
 There's no `POST /orders`: orders are created only through `POST /cart/checkout`,
-so every order goes through the stock and price checks.
+so every order goes through the stock and payment checks. There's no `PUT` or `DELETE` either:
+orders are a permanent record. (Cancelling a paid order would need a refund, which is Future Work.)
 
-`GET /orders/:orderId` response:
+`GET /orders` response (newest first; `[]` if there are none):
+```json
+[
+  { "id": 12, "status": "paid", "total_amount": "17.00", "item_count": 2, "created_at": "2026-10-15T09:36:52.487Z" }
+]
+```
+`item_count` adds up the quantities, e.g. 2 mugs + 1 teapot = 3.
+
+`GET /orders/:orderId` response: the same shape checkout returns (both use `services/orders.js`):
 ```json
 {
   "id": 12,
-  "status": "pending",
+  "status": "paid",
   "total_amount": "17.00",
-  "created_at": "2026-10-13T09:36:52.487Z",
-  "shipping_address": { "id": 3, "line_1": "10 Downing Street", "city": "London", "postal_code": "SW1A 2AA", "country_code": "GB" },
+  "created_at": "2026-10-15T09:36:52.487Z",
+  "shipping_address": { "id": 3, "line_1": "10 Downing Street", "line_2": null, "city": "London", "region": null, "postal_code": "SW1A 2AA", "country_code": "GB" },
   "items": [
-    { "product_id": 7, "name": "Coffee Mug", "quantity": 2, "unit_price": "8.50" }
+    { "product_id": 7, "sku": "MUG-001", "name": "Coffee Mug", "quantity": 2, "unit_price": "8.50", "line_total": "17.00" }
   ]
 }
 ```
-An `:orderId` belonging to another customer returns `404`.
+- `unit_price` is the price paid, frozen at checkout. Later price changes don't affect it, and
+  retired products still appear.
+- Errors: `400` invalid id, `401` not logged in, `404` the order doesn't exist **or belongs to
+  another customer**. Both cases give the same response, so other customers' orders are never revealed.
 
 ## Suggested build order
 
@@ -309,5 +321,5 @@ An `:orderId` belonging to another customer returns `404`.
 2. **Auth**: register, log in, log out (with sessions and password hashing)
 3. **Account and Addresses**
 4. **Cart**: built, using the `cart_items` table (see the database design)
-5. **Checkout** (built) **and Orders**
+5. **Checkout and Orders**: built
 6. **Google sign-in, Stripe**: in their own later tickets

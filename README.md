@@ -39,9 +39,11 @@ e-commerce-app/
 │   │   ├── products.js     # /products routes (browse, create, update, retire)
 │   │   ├── account.js      # /account routes (view, update, delete your own account)
 │   │   ├── cart.js         # /cart routes (view, add to, change, remove from, empty your cart)
-│   │   └── checkout.js     # POST /cart/checkout (turn the cart into a paid order)
+│   │   ├── checkout.js     # POST /cart/checkout (turn the cart into a paid order)
+│   │   └── orders.js       # /orders routes (your order history and order details)
 │   ├── services/
-│   │   └── payment-processor.js # FAKE payment processor (stands in for Stripe)
+│   │   ├── payment-processor.js # FAKE payment processor (stands in for Stripe)
+│   │   └── orders.js       # Builds a full order (address and items); shared by checkout and /orders
 │   ├── config/
 │   │   └── passport.js     # Passport.js setup: checks logins, remembers who's logged in
 │   ├── middleware/
@@ -65,6 +67,7 @@ e-commerce-app/
 │   │   ├── account.test.js       # Tests for the /account routes
 │   │   ├── cart.test.js          # Tests for the /cart routes
 │   │   ├── checkout.test.js      # Tests for POST /cart/checkout
+│   │   ├── orders.test.js        # Tests for the /orders routes
 │   │   ├── helpers.js      # Shared test helpers (e.g. emptying tables, logging in, adding test data)
 │   │   └── e2e/            # End-to-end tests, run by Newman against the running server
 │   │       └── ecommerce-api.e2e.postman_collection.json
@@ -169,6 +172,8 @@ npm start      # runs without auto-restart
 | `DELETE /cart/items/:productId` | Removes a product from your cart (must be logged in) |
 | `DELETE /cart` | Empties your cart (must be logged in) |
 | `POST /cart/checkout` | Pays for your cart and turns it into an order (must be logged in) |
+| `GET /orders` | Gets your order history, newest first (must be logged in) |
+| `GET /orders/:orderId` | Gets one of your orders in full (must be logged in) |
 
 Visit http://localhost:3000/health in your browser to test it.
 
@@ -427,6 +432,34 @@ The response is the new order:
 | `409 Conflict` | A product in your cart no longer has enough stock |
 | `502 Bad Gateway` | The payment processor failed; nothing was charged |
 
+#### Your orders
+Log in first (see above). You can only ever see your own orders.
+
+- **Order history:** send a **GET** to `http://localhost:3000/orders`. It returns a summary of
+  every order you've placed, newest first, or `[]` if you haven't ordered anything yet:
+  ```json
+  [
+    { "id": 2, "status": "paid", "total_amount": "8.50", "item_count": 1, "created_at": "2026-10-15T10:12:04.511Z" },
+    { "id": 1, "status": "paid", "total_amount": "41.00", "item_count": 3, "created_at": "2026-10-15T09:36:52.487Z" }
+  ]
+  ```
+  `item_count` adds up the quantities (2 mugs + 1 teapot = 3 items).
+- **One order in full:** send a **GET** to `http://localhost:3000/orders/1` (the order's id). It
+  returns the order with its shipping address and every item, in exactly the same shape checkout
+  returns (see the example above). Each item's `unit_price` is the price you **paid**: it was
+  frozen at checkout, so later price changes don't affect your history, and products that have
+  since been retired still appear.
+
+Orders can't be changed or deleted through the API: they're a permanent record of what was
+bought. They're created only by checking out.
+
+| Response | When |
+|---|---|
+| `200 OK` | Order history or order details returned |
+| `400 Bad Request` | The order id in the URL isn't a valid whole number |
+| `401 Unauthorized` | You aren't logged in |
+| `404 Not Found` | No order with that id, **or** it belongs to another customer |
+
 ### 6. Run the tests
 There are two kinds of automated test. Both are run from the `back-end` folder:
 
@@ -511,7 +544,7 @@ installed in the project's `node_modules`.
 | 2. Account | View, update, view again, an invalid update, a logged-out view | `200`, `200`, the update was saved, `400`, `401` |
 | 3. Cart | Create a test product (8.50, 5 in stock); view the empty cart; add 2; add 1 more; try to add 3 more; change the quantity to 1; remove it; remove it again; add it back; empty the cart; view it; view it logged out; retire the product | `201`; empty cart; total `17.00`; quantities added together to 3, total `25.50`; `409` (6 > 5 in stock); total `8.50`; `204`; `404`; `201`; `204`; empty cart; `401`; `204` |
 | 4. Delete account (clean-up) | Delete the account, then try to use it again | `204`, then `401` and `401` |
-| 5. Checkout | Register and log in a second customer; create a product (8.50, 5 in stock); add 2 to the cart; check out with a mistyped card, then a declined card; view the cart; check out successfully; view the cart and the product's stock; check out the empty cart; check out logged out; try to delete the account | `201`, `200`, `201`, total `17.00`; `400`, `402`; cart still holds 2; `201` paid order for `17.00` with the card number never sent back; empty cart, stock down to 3; `400`; `401`; `409` (order history is protected) |
+| 5. Checkout and orders | Register and log in a second customer; create a product (8.50, 5 in stock); add 2 to the cart; check out with a mistyped card, then a declined card; view the cart; check out successfully; view the cart and the product's stock; view the order history and the order's details; view an order that doesn't exist; view the history logged out; check out the empty cart; check out logged out; try to delete the account | `201`, `200`, `201`, total `17.00`; `400`, `402`; cart still holds 2; `201` paid order for `17.00` with the card number never sent back; empty cart, stock down to 3; exactly one order (paid, `17.00`, 2 items), with details matching what checkout returned; `404`; `401`; `400`; `401`; `409` (order history is protected) |
 
 After **every** request, a collection-level check also confirms the response never contains
 a `password` or `password_hash`.
@@ -523,9 +556,9 @@ of the **failed** column:
 ┌─────────────────────────┬───────────────────┬──────────────────┐
 │                         │          executed │           failed │
 ├─────────────────────────┼───────────────────┼──────────────────┤
-│                requests │                36 │                0 │
-│            test-scripts │                72 │                0 │
-│              assertions │                98 │                0 │
+│                requests │                40 │                0 │
+│            test-scripts │                80 │                0 │
+│              assertions │               110 │                0 │
 └─────────────────────────┴───────────────────┴──────────────────┘
 ```
 Newman exits with code `0` when everything passes and `1` when anything fails, so it can be
@@ -541,7 +574,7 @@ server isn't running; start it with step 1.
 - **Order matters.** Later requests rely on the session cookie from the latest login, and the
   cart and checkout requests rely on the product created at the start of their folder. Newman
   keeps cookies for the whole run, just like a browser; logging in as the second customer in
-  folder 5 replaces the first customer's cookie. The four requests that must be sent logged out
+  folder 5 replaces the first customer's cookie. The five requests that must be sent logged out
   switch cookies off for themselves.
 - **Don't run `npm test` at the same time.** Both use `ecommerce_test`, and `npm test` empties
   its tables before every test, which would pull the data out from under a running E2E run.
@@ -595,6 +628,7 @@ Implemented error handling for:
 - Invalid checkout details or an empty cart (`400`)
 - Declined payments (`402`)
 - Payment processor failures (`502`)
+- Orders not found, or belonging to another customer (`404`)
 - Failed logins (`400` / `401`)
 - Not logged in (`401`)
 - Malformed or missing request bodies (`400`)
@@ -725,6 +759,15 @@ first **locks** the cart's product rows (`SELECT ... FOR UPDATE`), so if two cus
 the last item at the same moment, one waits until the other has finished. The first gets the
 item; the second gets `409`, never a negative stock count or a crash.
 
+### Orders not found, or belonging to another customer: `404 Not Found`
+`GET /orders/:orderId` returns `404` when no order has that id **and** when the order belongs to
+another customer, with exactly the same response for both. A `403 Forbidden` would be more
+literal for someone else's order, but it would confirm that the order exists, letting anyone
+work out how many orders the shop has by guessing ids. The ownership check is part of the
+database query itself (`WHERE id = $1 AND customer_id = $2`), so another customer's order is
+simply never found. An id that isn't a valid whole number (e.g. `/orders/abc`) returns `400`, as
+with products.
+
 ### Failed logins: `400 Bad Request` / `401 Unauthorized`
 `POST /auth/login` returns `400` if `email` or `password` is missing, and `401` if they don't
 match an account. A wrong password and an unknown email return exactly the same `401` message.
@@ -733,8 +776,8 @@ Different messages would let anyone check whether an email address has an accoun
 ### Not logged in: `401 Unauthorized`
 Routes that need a logged-in customer use the `requireAuth` middleware, which returns `401`
 before the route runs if there's no active session. `POST /auth/logout`, the product create,
-update and retire routes, and every `/account` and `/cart` route (including checkout) use it
-now, and the order routes will too.
+update and retire routes, and every `/account`, `/cart` (including checkout) and `/orders`
+route use it.
 
 ### Malformed or missing request bodies: `400 Bad Request`
 A body that isn't valid JSON, or a request with no body at all, returns `400` instead of
@@ -751,7 +794,7 @@ errors can reveal how the app works internally.
 
 ### Testing
 The API is built using test-driven development (TDD): each test is written first and run to
-confirm it fails, then just enough code is added to make it pass. There are 238 tests:
+confirm it fails, then just enough code is added to make it pass. There are 254 tests:
 - **Registration (27):** successful registration, duplicate accounts (including simultaneous
   requests), and each type of invalid input above
 - **Login and logout (17):** successful login, staying logged in across requests, the `HttpOnly`
@@ -772,13 +815,17 @@ confirm it fails, then just enough code is added to make it pass. There are 238 
   payments and processor failures changing nothing, stock running out, two customers racing
   for the last item, card details never sent back, and each type of invalid payment or address
   detail above
+- **Orders (16):** order history newest first with hand-checked totals and item counts, full
+  order details, details matching exactly what checkout returned, prices paid staying the same
+  after price changes and retirements, login being required, other customers' orders being
+  invisible and giving the same `404` as an order that doesn't exist, and invalid ids
 
 Every test runs against a real PostgreSQL test database, not mocks.
 
-On top of these, an **end-to-end test collection** run by Newman (36 requests, 98 checks) takes
+On top of these, an **end-to-end test collection** run by Newman (40 requests, 110 checks) takes
 customers through registering, logging in, viewing and updating their account, filling,
-changing and emptying their cart, deleting their account, and checking out (including a
-mistyped card and a declined payment), using the real running server and the test
+changing and emptying their cart, deleting their account, checking out (including a
+mistyped card and a declined payment), and viewing their order history, using the real running server and the test
 database. It also checks that no response ever contains
 a password. It has been confirmed to fail (exit code `1`) when the server isn't running, so a
 broken server can't produce a passing run.

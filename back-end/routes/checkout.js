@@ -29,6 +29,8 @@ import { requireAuth } from '../middleware/require-auth.js';
 import { validateShippingAddress, validatePayment, cardDigits } from '../utils/validate-checkout.js';
 // The (fake) payment processor, and the error type it throws when it fails.
 import { processPayment, PaymentProcessorError } from '../services/payment-processor.js';
+// Builds a full order (address and items); shared with GET /orders/:orderId.
+import { getOrderDetails } from '../services/orders.js';
 
 const router = express.Router();
 
@@ -157,10 +159,11 @@ router.post('/', requireAuth, async (req, res) => {
     // Save the shipping address as one of the customer's addresses.
     // `?? null` stores NULL for optional fields that were left out.
     // .toUpperCase() stores the country code in capitals, e.g. 'gb' -> 'GB'.
+    // RETURNING id gives back the new address's id, needed for the order below.
     const addressResult = await client.query(
       `INSERT INTO addresses (customer_id, line_1, line_2, city, region, postal_code, country_code)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, line_1, line_2, city, region, postal_code, country_code`,
+       RETURNING id`,
       [
         customerId,
         shipping_address.line_1,
@@ -174,10 +177,11 @@ router.post('/', requireAuth, async (req, res) => {
     const address = addressResult.rows[0];
 
     // Create the order itself, marked 'paid' because the payment succeeded.
+    // Only its new id is needed here; the full order is read back at the end.
     const orderResult = await client.query(
       `INSERT INTO orders (customer_id, shipping_address_id, status, total_amount)
        VALUES ($1, $2, 'paid', $3)
-       RETURNING id, status, total_amount, created_at`,
+       RETURNING id`,
       [customerId, address.id, total]
     );
     const order = orderResult.rows[0];
@@ -209,24 +213,17 @@ router.post('/', requireAuth, async (req, res) => {
     // Empty the cart, including any retired products that were hidden in it.
     await client.query('DELETE FROM cart_items WHERE customer_id = $1', [customerId]);
 
-    // Read the order's items back for the response, each with its line total.
-    const itemsResult = await client.query(
-      `SELECT oi.product_id, p.sku, p.name, oi.quantity, oi.unit_price,
-              (oi.unit_price * oi.quantity)::numeric(12,2) AS line_total
-       FROM order_items AS oi
-       JOIN products AS p ON p.id = oi.product_id
-       WHERE oi.order_id = $1
-       ORDER BY oi.product_id`,
-      [order.id]
-    );
+    // Read the complete order back for the response, using the same function
+    // as GET /orders/:orderId, so the customer sees the order the same way in
+    // both places. It's passed `client` (not the pool) because the order isn't
+    // committed yet: only this transaction's own connection can see it.
+    const orderDetails = await getOrderDetails(client, customerId, order.id);
 
     // COMMIT makes every change since BEGIN permanent, all at once.
     await client.query('COMMIT');
 
-    // 201 Created, with the new order. Spread syntax (`...order`) copies the
-    // order's id, status, total_amount and created_at into the response.
-    // No payment details are included.
-    res.status(201).json({ ...order, shipping_address: address, items: itemsResult.rows });
+    // 201 Created, with the new order. No payment details are included.
+    res.status(201).json(orderDetails);
   } catch (err) {
     // Something unexpected went wrong part-way: undo the whole transaction,
     // then re-throw so app.js's error handler logs it and sends a 500.

@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "E-Commerce API: End-to-End Tests",
-    "description": "End-to-end (E2E) tests for the e-commerce API.\n\n**What \"end-to-end\" means here:** these requests go over the network to the real running server, which talks to a real PostgreSQL database, the same way a browser or the Postman app would. That's different from the unit/integration tests in `tests/*.test.js` (run with `npm test`), which load the app directly in Node without starting a server.\n\n**Which database:** the server for these tests is started with `npm run start:test`, which uses the `ecommerce_test` database, NOT your real `ecommerce` one. That's because the checkout tests place an order, and orders are permanent history: the customer and product on an order can never be deleted, so a run can't fully clean up after itself. The test database is wiped by `npm test` and `npm run db:test:reset`, so leftovers there don't matter.\n\n**How to run:** start the server with `npm run start:test`, then from the `back-end` folder run `npm run test:e2e`. Newman (Postman's command-line runner) runs every request below, in order, top to bottom. You can also import this file into the Postman app (File → Import) and use its Collection Runner.\n\n**Order matters:** the requests form one journey. Register a customer → log in → use the account → create a test product and use the cart → retire the product → delete the account → register a second customer → buy a product through checkout. Later requests rely on the session cookie saved by the login request, so run the whole collection, not single requests.\n\n**Cookies:** Newman (like Postman) keeps a cookie jar for the whole run, so after logging in every request automatically sends the session cookie. Requests that must be made logged-out switch cookies off for themselves (see each request's Settings → \"Disable cookie jar\", stored as `protocolProfileBehavior.disableCookies`).\n\n**What's left behind:** the first customer is deleted and their test product retired. The checkout customer, their order and address, and the product they bought stay in the test database (that's the point: orders are permanent). Every run uses unique emails and SKUs made from the current time, so leftovers never clash with the next run. Each run uses a unique email (`e2e.<timestamp>@example.invalid`; `.invalid` is a domain reserved for testing that can never be a real address), so if a run ever stops halfway, the leftover customer can't block the next run.\n\n**Variables** (collection variables, see the Variables tab):\n- `baseUrl`: where the server is running. Override with `--env-var baseUrl=...`.\n- `testEmail`, `testPassword`: the test customer's login details (`testEmail` is set fresh by the first request).\n- `customerId`: the test customer's id, saved after registration.\n- `testSku`, `productId`: the current test product's unique SKU and id, used by the cart and checkout requests.\n- `checkoutEmail`: the second customer's unique email, used by the checkout folder.",
+    "description": "End-to-end (E2E) tests for the e-commerce API.\n\n**What \"end-to-end\" means here:** these requests go over the network to the real running server, which talks to a real PostgreSQL database, the same way a browser or the Postman app would. That's different from the unit/integration tests in `tests/*.test.js` (run with `npm test`), which load the app directly in Node without starting a server.\n\n**Which database:** the server for these tests is started with `npm run start:test`, which uses the `ecommerce_test` database, NOT your real `ecommerce` one. That's because the checkout tests place an order, and orders are permanent history: the customer and product on an order can never be deleted, so a run can't fully clean up after itself. The test database is wiped by `npm test` and `npm run db:test:reset`, so leftovers there don't matter.\n\n**How to run:** start the server with `npm run start:test`, then from the `back-end` folder run `npm run test:e2e`. Newman (Postman's command-line runner) runs every request below, in order, top to bottom. You can also import this file into the Postman app (File → Import) and use its Collection Runner.\n\n**Order matters:** the requests form one journey. Register a customer → log in → use the account → create a test product and use the cart → retire the product → delete the account → register a second customer → buy a product through checkout → view the order history. Later requests rely on the session cookie saved by the login request, so run the whole collection, not single requests.\n\n**Cookies:** Newman (like Postman) keeps a cookie jar for the whole run, so after logging in every request automatically sends the session cookie. Requests that must be made logged-out switch cookies off for themselves (see each request's Settings → \"Disable cookie jar\", stored as `protocolProfileBehavior.disableCookies`).\n\n**What's left behind:** the first customer is deleted and their test product retired. The checkout customer, their order and address, and the product they bought stay in the test database (that's the point: orders are permanent). Every run uses unique emails and SKUs made from the current time, so leftovers never clash with the next run. Each run uses a unique email (`e2e.<timestamp>@example.invalid`; `.invalid` is a domain reserved for testing that can never be a real address), so if a run ever stops halfway, the leftover customer can't block the next run.\n\n**Variables** (collection variables, see the Variables tab):\n- `baseUrl`: where the server is running. Override with `--env-var baseUrl=...`.\n- `testEmail`, `testPassword`: the test customer's login details (`testEmail` is set fresh by the first request).\n- `customerId`: the test customer's id, saved after registration.\n- `testSku`, `productId`: the current test product's unique SKU and id, used by the cart and checkout requests.\n- `checkoutEmail`: the second customer's unique email, used by the checkout folder.\n- `orderId`, `checkoutOrder`: the order placed at checkout, read back by the order-history requests.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -39,6 +39,16 @@
       "key": "checkoutEmail",
       "value": "",
       "description": "Set by the 'Register a checkout customer' pre-request script to a unique address for the second customer, who checks out."
+    },
+    {
+      "key": "orderId",
+      "value": "",
+      "description": "The id of the order placed by 'Check out (payment succeeds)', read back by the order-history requests."
+    },
+    {
+      "key": "checkoutOrder",
+      "value": "",
+      "description": "The whole order returned by checkout, saved as a JSON string, so 'View the order's details' can check GET /orders/:orderId returns exactly the same thing."
     }
   ],
   "event": [
@@ -866,8 +876,8 @@
       ]
     },
     {
-      "name": "5. Checkout",
-      "description": "A second test customer buys a product, going through every checkout outcome: a mistyped card (400), a declined card (402, with the cart kept), a successful payment (201, a paid order, the cart emptied and the stock reduced), checking out an empty cart (400), and checking out while logged out (401).\n\nThis uses a NEW customer because the folder 4 customer has been deleted. Placing an order makes a customer's history permanent: the last request checks that this customer's account can't now be deleted (409). That's why these tests run against the test database, which `npm test` and `npm run db:test:reset` wipe.\n\nThe product costs 8.50 with 5 in stock, and the customer buys 2, so the total is 17.00 and 3 are left afterwards.",
+      "name": "5. Checkout and orders",
+      "description": "A second test customer buys a product, going through every checkout outcome: a mistyped card (400), a declined card (402, with the cart kept), a successful payment (201, a paid order, the cart emptied and the stock reduced), checking out an empty cart (400), and checking out while logged out (401). In between, the new order is read back through the order history routes: the history lists exactly one order, its details match what checkout returned, an unknown order is 404, and a logged-out request is 401.\n\nThis uses a NEW customer because the folder 4 customer has been deleted. Placing an order makes a customer's history permanent: the last request checks that this customer's account can't now be deleted (409). That's why these tests run against the test database, which `npm test` and `npm run db:test:reset` wipe.\n\nThe product costs 8.50 with 5 in stock, and the customer buys 2, so the total is 17.00 and 3 are left afterwards.",
       "item": [
         {
           "name": "Register a checkout customer",
@@ -1133,6 +1143,12 @@
                   "  const order = pm.response.json();",
                   "  pm.expect(order.status).to.equal('paid');",
                   "  pm.expect(order.total_amount).to.equal('17.00');",
+                  "",
+                  "  // Save the order for the order-history requests below: its id, and the",
+                  "  // whole order as text (collection variables can only hold strings, so",
+                  "  // JSON.stringify() turns the object into a JSON string).",
+                  "  pm.collectionVariables.set('orderId', order.id);",
+                  "  pm.collectionVariables.set('checkoutOrder', JSON.stringify(order));",
                   "});",
                   "",
                   "// The price is copied into the order (unit_price), freezing it there.",
@@ -1226,6 +1242,132 @@
             "header": [],
             "url": "{{baseUrl}}/products/{{productId}}",
             "description": "GET /products/:productId (a public route): proves checkout reduced the stock by the quantity bought."
+          }
+        },
+        {
+          "name": "View order history",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 OK', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "// This customer has placed exactly one order: the one just checked out.",
+                  "// The declined payment earlier must NOT have created an order.",
+                  "pm.test('lists exactly one order: the one just placed', function () {",
+                  "  const orders = pm.response.json();",
+                  "  pm.expect(orders).to.have.lengthOf(1);",
+                  "  pm.expect(orders[0].id).to.equal(Number(pm.collectionVariables.get('orderId')));",
+                  "});",
+                  "",
+                  "// Each order in the history is a short summary. item_count adds up the",
+                  "// quantities: 2 mugs = 2 items.",
+                  "pm.test('summarises the order: paid, 17.00, 2 items', function () {",
+                  "  const summary = pm.response.json()[0];",
+                  "  pm.expect(summary.status).to.equal('paid');",
+                  "  pm.expect(summary.total_amount).to.equal('17.00');",
+                  "  pm.expect(summary.item_count).to.equal(2);",
+                  "  pm.expect(summary.created_at).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/orders",
+            "description": "GET /orders: the logged-in customer's order history, newest first. Expects the one order placed above."
+          }
+        },
+        {
+          "name": "View the order's details",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 OK', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "// Checkout and this route build the order with the same shared function,",
+                  "// so the details must match what checkout returned, field for field.",
+                  "// JSON.parse() turns the saved JSON string back into an object.",
+                  "pm.test('matches exactly what checkout returned', function () {",
+                  "  const fromCheckout = JSON.parse(pm.collectionVariables.get('checkoutOrder'));",
+                  "  pm.expect(pm.response.json()).to.deep.equal(fromCheckout);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/orders/{{orderId}}",
+            "description": "GET /orders/:orderId: one order in full, with its shipping address and items. Expects the same order checkout returned."
+          }
+        },
+        {
+          "name": "View an order that doesn't exist (refused)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 2147483647 is the largest id PostgreSQL's integer type allows, so no",
+                  "// real order will ever have it. It's still a VALID id, so the answer is",
+                  "// 404 (not found), not 400 (invalid).",
+                  "pm.test('status is 404 Not Found', function () {",
+                  "  pm.response.to.have.status(404);",
+                  "});",
+                  "",
+                  "pm.test('explains the problem in an error message', function () {",
+                  "  pm.expect(pm.response.json().error).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/orders/2147483647",
+            "description": "GET /orders/:orderId for an order that doesn't exist. Expects 404. Another customer's order gives exactly the same response, so nothing is revealed about it."
+          }
+        },
+        {
+          "name": "View order history while logged out (refused)",
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cookies are switched off for this request, so it arrives without a",
+                  "// session cookie. Order history is private, so it must be refused.",
+                  "pm.test('status is 401 Unauthorized', function () {",
+                  "  pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/orders",
+            "description": "GET /orders with the cookie jar disabled for this request only. Expects 401."
           }
         },
         {

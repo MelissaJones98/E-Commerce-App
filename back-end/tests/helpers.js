@@ -53,6 +53,38 @@ export const loggedInAgent = async (details = {}) => {
   return agent;
 };
 
+// A valid POST /cart/checkout body: a shipping address, plus the test card
+// number that the fake payment processor always accepts.
+export const validCheckout = {
+  shipping_address: {
+    line_1: '10 Downing Street',
+    line_2: null,
+    city: 'London',
+    region: null,
+    postal_code: 'SW1A 2AA',
+    country_code: 'GB',
+  },
+  payment: {
+    cardholder_name: 'Test Customer',
+    card_number: '4242 4242 4242 4242',
+    expiry_month: 12,
+    expiry_year: 2099,
+    cvc: '123',
+  },
+};
+
+// Places an order as the given logged-in agent, using the real APIs exactly
+// as a customer would: add each item to the cart, then check out.
+// `items` is an array of { product_id, quantity }.
+// Returns the checkout response (res.body is the new order).
+export const placeOrder = async (agent, items) => {
+  // `for...of` adds the items one at a time, in order.
+  for (const item of items) {
+    await agent.post('/cart/items').send(item);
+  }
+  return agent.post('/cart/checkout').send(validCheckout);
+};
+
 // Inserts a category directly into the database and returns its new id.
 // (There are no category API routes yet, so tests add them with SQL.)
 export const insertCategory = async (name) => {
