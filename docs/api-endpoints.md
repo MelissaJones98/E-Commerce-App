@@ -49,6 +49,8 @@ database tables:
 | `401 Unauthorized` | Not logged in | Accessing the cart without logging in |
 | `404 Not Found` | The resource doesn't exist | `GET /products/999` |
 | `409 Conflict` | Clashes with existing data | Registering with an email that's taken; buying more than is in stock |
+| `402 Payment Required` | The payment didn't go through | A declined card at checkout |
+| `502 Bad Gateway` | A service the API relies on failed | The payment processor is down at checkout |
 | `503 Service Unavailable` | The database can't be reached | `GET /health` when PostgreSQL is down |
 
 ## Endpoints
@@ -224,16 +226,57 @@ Errors:
 - `404`: the product doesn't exist or is retired (`POST`), or isn't in your cart (`PUT`, `DELETE`).
 - `409`: not enough stock. `POST` checks the quantity already in the cart plus the new quantity.
 
-`POST /cart/checkout` request: `{ "shipping_address_id": 3 }`.
-In a single database transaction, it:
-1. Checks the cart isn't empty (`400`) and the address belongs to the customer (`404`)
-2. Checks every product has enough stock (`409` if not)
-3. Creates the `orders` row and copies each cart item into `order_items` with its current price
-4. Reduces each product's `stock_quantity`
-5. Empties the cart
+`POST /cart/checkout` request:
+```json
+{
+  "shipping_address": {
+    "line_1": "10 Downing Street",
+    "line_2": null,
+    "city": "London",
+    "region": null,
+    "postal_code": "SW1A 2AA",
+    "country_code": "GB"
+  },
+  "payment": {
+    "cardholder_name": "Ada Lovelace",
+    "card_number": "4242 4242 4242 4242",
+    "expiry_month": 12,
+    "expiry_year": 2030,
+    "cvc": "123"
+  }
+}
+```
+The shipping address is sent with the order (there are no saved-address endpoints yet) and is
+saved to `addresses`. `line_2` and `region` are optional.
 
-Response `201` is the new order, in the same shape as `GET /orders/:orderId`.
-Stripe payment is added in a later ticket. Until then, orders are created with status `pending`.
+It works in this order:
+1. **Checks the request**: the address and payment details (`400` if wrong). The card number
+   must pass the Luhn checksum, the card mustn't have expired, and the CVC must be 3–4 digits.
+2. **Checks the cart**: locks its products (`SELECT ... FOR UPDATE`), then checks it isn't empty
+   (`400`) and that every product has enough stock (`409`).
+3. **Takes the payment** with a fake processor that copies Stripe's test cards:
+   `4000 0000 0000 0002` is declined (`402`), `4000 0000 0000 0119` makes the processor fail
+   (`502`), and any other valid card succeeds.
+4. **Creates the order** as `paid`: saves the address, copies each cart item into `order_items`
+   with its current price, reduces each product's `stock_quantity`, and empties the cart.
+
+Steps 2–4 run in one database transaction, so any failure leaves the cart, stock and orders
+exactly as they were. Card details are never stored or returned.
+
+Response `201`:
+```json
+{
+  "id": 12,
+  "status": "paid",
+  "total_amount": "17.00",
+  "created_at": "2026-10-15T09:36:52.487Z",
+  "shipping_address": { "id": 3, "line_1": "10 Downing Street", "line_2": null, "city": "London", "region": null, "postal_code": "SW1A 2AA", "country_code": "GB" },
+  "items": [
+    { "product_id": 7, "sku": "MUG-001", "name": "Coffee Mug", "quantity": 2, "unit_price": "8.50", "line_total": "17.00" }
+  ]
+}
+```
+Real payments (Stripe) are added in a later ticket, replacing only the fake processor.
 
 ### Orders
 
@@ -266,5 +309,5 @@ An `:orderId` belonging to another customer returns `404`.
 2. **Auth**: register, log in, log out (with sessions and password hashing)
 3. **Account and Addresses**
 4. **Cart**: built, using the `cart_items` table (see the database design)
-5. **Checkout and Orders**
+5. **Checkout** (built) **and Orders**
 6. **Google sign-in, Stripe**: in their own later tickets

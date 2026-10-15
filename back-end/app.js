@@ -20,6 +20,7 @@ import authRouter from './routes/auth.js';
 import productsRouter from './routes/products.js';
 import accountRouter from './routes/account.js';
 import cartRouter from './routes/cart.js';
+import checkoutRouter from './routes/checkout.js';
 
 // `process.env` holds environment variables: settings that come from outside
 // the code, here from back-end/.env (loaded by the --env-file flag in the
@@ -79,6 +80,9 @@ app.use(passport.session());
 app.use('/auth', authRouter);
 app.use('/products', productsRouter);
 app.use('/account', accountRouter);
+// Checkout is mounted BEFORE the cart router. Express checks routes in the
+// order they're added, so /cart/checkout must be matched here first.
+app.use('/cart/checkout', checkoutRouter);
 app.use('/cart', cartRouter);
 
 // GET /: a simple test route. app.get() handles GET requests to a path.
