@@ -22,6 +22,13 @@ import accountRouter from './routes/account.js';
 import cartRouter from './routes/cart.js';
 import checkoutRouter from './routes/checkout.js';
 import ordersRouter from './routes/orders.js';
+// readFileSync reads a whole file's contents (used once, at startup).
+import { readFileSync } from 'node:fs';
+// yaml converts YAML text (the format openapi.yaml is written in) into a
+// JavaScript object.
+import YAML from 'yaml';
+// swagger-ui-express serves Swagger UI: the interactive documentation page.
+import swaggerUi from 'swagger-ui-express';
 
 // `process.env` holds environment variables: settings that come from outside
 // the code, here from back-end/.env (loaded by the --env-file flag in the
@@ -86,6 +93,29 @@ app.use('/account', accountRouter);
 app.use('/cart/checkout', checkoutRouter);
 app.use('/cart', cartRouter);
 app.use('/orders', ordersRouter);
+
+// ---------------------------------------------------------------------------
+// API documentation (Swagger)
+// ---------------------------------------------------------------------------
+// Load the OpenAPI spec once, when the app starts.
+//   new URL('./openapi.yaml', import.meta.url)  finds openapi.yaml next to
+//     this file, wherever the app is started from
+//   readFileSync(..., 'utf8')                    reads it as text
+//   YAML.parse(...)                              turns the text into an object
+const openApiSpec = YAML.parse(readFileSync(new URL('./openapi.yaml', import.meta.url), 'utf8'));
+
+// GET /api-docs/openapi.json: the raw spec as JSON, for tools such as Postman
+// (Import → Link) or code generators. Added BEFORE the Swagger UI line below,
+// because that one handles every address under /api-docs.
+app.get('/api-docs/openapi.json', (req, res) => {
+  res.json(openApiSpec);
+});
+
+// /api-docs: the interactive documentation page.
+//   swaggerUi.serve          sends the page's JavaScript and CSS files
+//   swaggerUi.setup(spec)    builds the page from our spec
+// app.use() accepts several middleware functions; they run in order.
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
 
 // GET /: a simple test route. app.get() handles GET requests to a path.
 // The function receives `req` (the incoming request; unused here) and `res`

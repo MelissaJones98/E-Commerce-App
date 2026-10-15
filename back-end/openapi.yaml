@@ -1,0 +1,1012 @@
+# OpenAPI specification for the e-commerce API.
+#
+# WHAT THIS FILE IS
+# OpenAPI is the standard, machine-readable way to describe a REST API: every
+# endpoint, what it expects, and what it returns. Swagger UI reads this file
+# and turns it into the interactive documentation page at
+# http://localhost:3000/api-docs (set up in app.js). Other tools can read it
+# too; Postman, for example, can import it as a collection.
+#
+# HOW YAML WORKS (the format this file is written in)
+#   key: value       a property, like `"key": "value"` in JSON
+#   indentation      nesting: indented lines belong to the line above
+#   - item           an item in a list (an array)
+#   # ...            a comment, ignored by every tool
+#   |                a multi-line text block follows
+#
+# HOW THIS FILE IS ORGANISED
+#   info, servers, tags   general information shown at the top of the docs
+#   paths                 every endpoint (the main part)
+#   components            reusable pieces the paths refer to with
+#                         `$ref: '#/components/...'`, so each shape is written
+#                         once (e.g. the Product schema is used by 4 endpoints)
+#
+# KEEPING IT IN SYNC
+# tests/docs.test.js checks that this file is valid OpenAPI, and that every
+# endpoint documented here really exists in the app. When you add or change a
+# route, update this file too.
+
+# The version of the OpenAPI standard this file follows. 3.0.x is the version
+# Swagger UI and most other tools support best.
+openapi: 3.0.3
+
+# ---------------------------------------------------------------------------
+# General information
+# ---------------------------------------------------------------------------
+info:
+  title: E-Commerce API
+  version: 1.0.0
+  # Markdown (e.g. **bold**, `code`, lists) is allowed in descriptions.
+  description: |
+    A REST API for an e-commerce shop: register and log in, browse products,
+    manage your account and cart, check out, and view your order history.
+
+    **Logging in:** most endpoints need a logged-in customer. Use
+    `POST /auth/login` (in the **Auth** section below) with **Try it out**: the
+    server replies with a session cookie, and your browser sends it with every
+    later request, including ones made from this page. Endpoints that need it
+    show a padlock.
+
+    **Money:** prices and totals are sent back as **strings with 2 decimal
+    places** (e.g. `"8.50"`) so their exact values are kept. When creating or
+    updating a product, send the price as a JSON **number** (e.g. `8.5`).
+
+    **Errors:** every error response has the shape `{ "error": "description" }`.
+
+    **Payments:** checkout uses a FAKE payment processor; no money moves. See
+    `POST /cart/checkout` for the test card numbers.
+
+# The base address(es) the API runs at. Swagger UI's "Try it out" sends
+# requests here. `url: /` means "the same server this page was loaded from".
+servers:
+  - url: /
+    description: The server this documentation is being served from
+
+# Tags are the sections endpoints are grouped into in Swagger UI, listed in
+# this order. Each endpoint below names its tag.
+tags:
+  - name: Health
+    description: Checking the API is running
+  - name: Auth
+    description: Registering, logging in and logging out
+  - name: Products
+    description: Browsing products (public) and managing them (logged in)
+  - name: Account
+    description: The logged-in customer's own details
+  - name: Cart
+    description: The logged-in customer's shopping cart
+  - name: Checkout
+    description: Paying for the cart and turning it into an order
+  - name: Orders
+    description: The logged-in customer's order history
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+# Each path lists its HTTP methods. Under each method:
+#   summary       one line, shown next to the endpoint in Swagger UI
+#   description   more detail, shown when the endpoint is opened
+#   tags          which section it appears in
+#   security      [{ cookieAuth: [] }] means "requires login" (the padlock);
+#                 see components.securitySchemes at the bottom
+#   parameters    values in the URL path (e.g. {productId}) or query string
+#   requestBody   the JSON the client sends
+#   responses     every status code it can return, and the body for each
+paths:
+
+  # -------------------------------------------------------------------------
+  # Health
+  # -------------------------------------------------------------------------
+  /health:
+    get:
+      tags: [Health]
+      summary: Check the API and database are working
+      description: Runs a trivial database query. Doesn't need a login.
+      responses:
+        '200':
+          description: The API is running and connected to the database.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          description: The API is running, but the database can't be reached.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: error }
+                  message: { type: string, example: Database unavailable }
+
+  # -------------------------------------------------------------------------
+  # Auth
+  # -------------------------------------------------------------------------
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Create a customer account
+      description: |
+        Creates a customer. The email is the account's unique identifier; it's
+        trimmed and lower-cased before saving, so `Ada@Example.com` and
+        `ada@example.com` are the same account. The password is stored only as
+        a bcrypt hash and is never returned. Registering doesn't log you in.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterInput'
+      responses:
+        '201':
+          description: The account was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: An account with this email already exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: An account with this email already exists
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in
+      description: |
+        Logs in with an email and password. On success the server sets a
+        session cookie (`connect.sid`), which the browser sends with every
+        later request to identify you. A wrong password and an unknown email
+        give exactly the same error, so the response never reveals which
+        emails are registered.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginInput'
+      responses:
+        '200':
+          description: Logged in. The response sets the session cookie.
+          headers:
+            Set-Cookie:
+              description: The session cookie, marked HttpOnly so page scripts can't read it.
+              schema:
+                type: string
+                example: connect.sid=s%3Aabc123; Path=/; HttpOnly
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: The email or password is wrong.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Incorrect email or password
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Log out
+      description: Ends the session, so the session cookie no longer logs you in.
+      security:
+        - cookieAuth: []
+      responses:
+        '204':
+          description: Logged out. There is no response body.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # -------------------------------------------------------------------------
+  # Products
+  # -------------------------------------------------------------------------
+  /products:
+    get:
+      tags: [Products]
+      summary: List products
+      description: |
+        Lists every product currently in the shop, in id order. Retired
+        products never appear. Doesn't need a login. Add `?category=` to list
+        only one category's products.
+      parameters:
+        - $ref: '#/components/parameters/CategoryQuery'
+      responses:
+        '200':
+          description: The products (an empty list if there are none).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    post:
+      tags: [Products]
+      summary: Create a product
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductInput'
+      responses:
+        '201':
+          description: The product was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Another product already has this SKU.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Another product already has this SKU
+
+  # {productId} in the path is a placeholder, described by the ProductId
+  # parameter in components. e.g. GET /products/7
+  /products/{productId}:
+    get:
+      tags: [Products]
+      summary: Get one product
+      description: Doesn't need a login. A retired product returns 404.
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '200':
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Products]
+      summary: Replace a product's details
+      description: |
+        PUT replaces the whole product, so send every field (the same body as
+        creating a product), not just the ones that changed.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductInput'
+      responses:
+        '200':
+          description: The updated product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Another product already has this SKU.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Products]
+      summary: Retire a product
+      description: |
+        Hides the product from the shop (`is_active = false`). The product is
+        kept in the database, because past orders refer to it.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '204':
+          description: Retired. There is no response body.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # -------------------------------------------------------------------------
+  # Account
+  # -------------------------------------------------------------------------
+  /account:
+    get:
+      tags: [Account]
+      summary: Get your account details
+      description: There's no id in the URL; the account comes from your login session.
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Your details. The password hash is never included.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      tags: [Account]
+      summary: Replace your account details
+      description: |
+        Send first_name, last_name and email every time. phone is optional,
+        and leaving it out clears it. Any other fields (such as id or
+        password_hash) are ignored. Passwords can't be changed here.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountInput'
+      responses:
+        '200':
+          description: Your updated details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: The new email belongs to another account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Account]
+      summary: Delete your account
+      description: |
+        Deletes your account, your saved addresses and your cart, and logs you
+        out. Accounts that have placed orders can't be deleted (409), because
+        order history is permanent.
+      security:
+        - cookieAuth: []
+      responses:
+        '204':
+          description: Deleted and logged out. There is no response body.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: The account has order history, so it can't be deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Accounts with order history cannot be deleted
+
+  # -------------------------------------------------------------------------
+  # Cart
+  # -------------------------------------------------------------------------
+  /cart:
+    get:
+      tags: [Cart]
+      summary: View your cart
+      description: |
+        Items are listed in the order they were added, each at the product's
+        CURRENT price (the cart stores no prices; they're frozen only at
+        checkout). Retired products are hidden and left out of the total.
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          # Quoted, because the text contains ": ", which YAML would otherwise
+          # read as the start of a new key.
+          description: 'Your cart (`{ "items": [], "total": "0.00" }` when empty).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    delete:
+      tags: [Cart]
+      summary: Empty your cart
+      description: Always 204, even if the cart was already empty.
+      security:
+        - cookieAuth: []
+      responses:
+        '204':
+          description: Emptied. There is no response body.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /cart/items:
+    post:
+      tags: [Cart]
+      summary: Add a product to your cart
+      description: |
+        If the product is already in your cart, the quantities are ADDED
+        together. The total quantity can't be more than the product's stock.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddCartItemInput'
+      responses:
+        '201':
+          description: Added. Returns the whole updated cart.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The product doesn't exist or has been retired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          $ref: '#/components/responses/NotEnoughStock'
+
+  /cart/items/{productId}:
+    put:
+      tags: [Cart]
+      summary: Change how many of a product are in your cart
+      description: |
+        REPLACES the quantity (it doesn't add to it). To remove an item, use
+        DELETE rather than a quantity of 0.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuantityInput'
+      responses:
+        '200':
+          description: Changed. Returns the whole updated cart.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cart'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: That product isn't in your cart.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          $ref: '#/components/responses/NotEnoughStock'
+    delete:
+      tags: [Cart]
+      summary: Remove a product from your cart
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '204':
+          description: Removed. There is no response body.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: That product isn't in your cart.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # -------------------------------------------------------------------------
+  # Checkout
+  # -------------------------------------------------------------------------
+  /cart/checkout:
+    post:
+      tags: [Checkout]
+      summary: Pay for your cart and place an order
+      description: |
+        In one database transaction: checks the cart isn't empty and there's
+        enough stock, takes the payment, then saves the shipping address,
+        creates the order as `paid` (freezing each product's price), reduces
+        the stock and empties the cart. If any step fails, nothing changes.
+
+        **No real money moves.** A fake payment processor stands in for Stripe,
+        using Stripe's test card numbers:
+
+        | Card number | Result |
+        |---|---|
+        | `4242 4242 4242 4242` | Succeeds (as does any other valid card number) |
+        | `4000 0000 0000 0002` | Declined: 402 |
+        | `4000 0000 0000 0119` | Payment processor fails: 502 |
+
+        Card details are checked first (the number must pass the Luhn check,
+        and the card mustn't have expired). They're never stored or returned.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckoutInput'
+      responses:
+        '201':
+          description: Payment succeeded. Returns the new order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          description: The address or payment details are invalid, or the cart is empty.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: payment.card_number is not a valid card number
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          description: The card was declined. Nothing changed; the cart is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Your card was declined
+        '409':
+          $ref: '#/components/responses/NotEnoughStock'
+        '502':
+          description: The payment processor failed. Nothing was charged, and nothing changed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Payment could not be processed. Please try again later.
+
+  # -------------------------------------------------------------------------
+  # Orders
+  # -------------------------------------------------------------------------
+  /orders:
+    get:
+      tags: [Orders]
+      summary: Get your order history
+      description: A summary of each order you've placed, newest first.
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Your orders (an empty list if you haven't ordered yet).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrderSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /orders/{orderId}:
+    get:
+      tags: [Orders]
+      summary: Get one of your orders in full
+      description: |
+        The same shape checkout returns. Each item's unit_price is the price
+        paid, frozen at checkout. Another customer's order returns 404, exactly
+        like an order that doesn't exist, so its existence is never revealed.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: The order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+# ---------------------------------------------------------------------------
+# Reusable components
+# ---------------------------------------------------------------------------
+# Anything defined here is used elsewhere with `$ref: '#/components/<section>/<name>'`.
+# `#` means "this file", and the rest is the route to the definition.
+components:
+
+  # How endpoints are protected. Each endpoint marked
+  # `security: [{ cookieAuth: [] }]` needs this session cookie.
+  securitySchemes:
+    cookieAuth:
+      # apiKey here means "a secret sent with each request"; `in: cookie`
+      # means it's sent as a cookie, named connect.sid (express-session's
+      # default name). You don't type it in: logging in sets it.
+      type: apiKey
+      in: cookie
+      name: connect.sid
+      description: The session cookie set by `POST /auth/login`.
+
+  # Parameters used by more than one endpoint.
+  parameters:
+    ProductId:
+      name: productId
+      # in: path means it's part of the URL, e.g. the 7 in /products/7.
+      in: path
+      required: true
+      description: The product's id.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 2147483647
+        example: 1
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      description: The order's id.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 2147483647
+        example: 1
+    CategoryQuery:
+      name: category
+      # in: query means it goes after a ? in the URL, e.g. /products?category=2.
+      in: query
+      required: false
+      description: Only list products in this category.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 2147483647
+        example: 1
+
+  # Responses used by many endpoints, so each is written only once.
+  responses:
+    BadRequest:
+      description: The request is invalid; the error message says what's wrong.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: quantity must be a whole number of at least 1
+    Unauthorized:
+      description: You aren't logged in.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: You must be logged in
+    NotFound:
+      description: It doesn't exist (or, for orders, isn't yours).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Product not found
+    NotEnoughStock:
+      description: There isn't enough stock of a product.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: 'Not enough stock: 5 available, 3 already in your cart'
+
+  # Schemas describe the shape of JSON bodies. In a schema:
+  #   type          string, integer, number, boolean, array or object
+  #   properties    an object's fields, each with its own schema
+  #   required      the fields that must be present
+  #   nullable      the field may be null
+  #   format        a more specific kind of string or number, e.g. date-time
+  #   example       a sample value, shown in the docs and used by "Try it out"
+  #   minimum, maxLength, pattern...   the limits the API enforces
+  schemas:
+
+    Error:
+      description: The shape of every error response.
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: Product not found
+
+    Health:
+      type: object
+      properties:
+        status: { type: string, example: ok }
+        database: { type: string, example: ecommerce }
+        time: { type: string, format: date-time }
+
+    # --- Customers and accounts ---------------------------------------------
+
+    RegisterInput:
+      type: object
+      required: [first_name, last_name, email, password]
+      properties:
+        first_name: { type: string, maxLength: 100, example: Ada }
+        last_name: { type: string, maxLength: 100, example: Lovelace }
+        email: { type: string, format: email, maxLength: 255, example: ada@example.com }
+        password:
+          type: string
+          minLength: 8
+          description: 8 or more characters, and no more than 72 bytes (bcrypt's limit).
+          example: correct-horse-battery
+
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, example: ada@example.com }
+        password: { type: string, example: correct-horse-battery }
+
+    Customer:
+      description: A customer, as returned by registering and logging in.
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        first_name: { type: string, example: Ada }
+        last_name: { type: string, example: Lovelace }
+        email: { type: string, format: email, example: ada@example.com }
+
+    Account:
+      description: Your account details, as returned by the /account routes.
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        first_name: { type: string, example: Ada }
+        last_name: { type: string, example: Lovelace }
+        email: { type: string, format: email, example: ada@example.com }
+        phone: { type: string, nullable: true, example: '+44 20 7946 0000' }
+
+    AccountInput:
+      type: object
+      required: [first_name, last_name, email]
+      properties:
+        first_name: { type: string, maxLength: 100, example: Ada }
+        last_name: { type: string, maxLength: 100, example: Lovelace }
+        email: { type: string, format: email, maxLength: 255, example: ada@example.com }
+        phone:
+          type: string
+          nullable: true
+          maxLength: 30
+          # A regular expression: only digits, spaces, +, - and brackets.
+          pattern: '^[0-9+()\-\s]+$'
+          description: Optional. Leaving it out clears it.
+          example: '+44 20 7946 0000'
+
+    # --- Products -----------------------------------------------------------
+
+    Product:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        category_id: { type: integer, nullable: true, example: 1 }
+        sku: { type: string, example: MUG-001 }
+        name: { type: string, example: Coffee Mug }
+        description: { type: string, nullable: true, example: A 350ml ceramic mug }
+        price:
+          type: string
+          description: A string with 2 decimal places, so the exact value is kept.
+          example: '8.50'
+        stock_quantity: { type: integer, example: 42 }
+
+    ProductInput:
+      type: object
+      required: [sku, name, price, stock_quantity]
+      properties:
+        sku: { type: string, maxLength: 50, example: MUG-001 }
+        name: { type: string, maxLength: 255, example: Coffee Mug }
+        description: { type: string, nullable: true, example: A 350ml ceramic mug }
+        price:
+          type: number
+          minimum: 0
+          maximum: 99999999.99
+          description: A JSON number (not a string), with at most 2 decimal places.
+          example: 8.5
+        stock_quantity: { type: integer, minimum: 0, maximum: 2147483647, example: 42 }
+        category_id:
+          type: integer
+          nullable: true
+          minimum: 1
+          description: Optional. Must be an existing category's id.
+          example: 1
+
+    # --- Cart ---------------------------------------------------------------
+
+    CartItem:
+      type: object
+      properties:
+        product_id: { type: integer, example: 1 }
+        sku: { type: string, example: MUG-001 }
+        name: { type: string, example: Coffee Mug }
+        price: { type: string, description: The product's current price., example: '8.50' }
+        quantity: { type: integer, example: 2 }
+        line_total: { type: string, description: price x quantity., example: '17.00' }
+
+    Cart:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CartItem'
+        total: { type: string, example: '17.00' }
+
+    AddCartItemInput:
+      type: object
+      required: [product_id, quantity]
+      properties:
+        product_id: { type: integer, minimum: 1, example: 1 }
+        quantity: { type: integer, minimum: 1, example: 2 }
+
+    QuantityInput:
+      type: object
+      required: [quantity]
+      properties:
+        quantity: { type: integer, minimum: 1, example: 5 }
+
+    # --- Checkout -----------------------------------------------------------
+
+    ShippingAddressInput:
+      type: object
+      required: [line_1, city, postal_code, country_code]
+      properties:
+        line_1: { type: string, maxLength: 255, example: 10 Downing Street }
+        line_2: { type: string, nullable: true, maxLength: 255, example: null }
+        city: { type: string, maxLength: 100, example: London }
+        region: { type: string, nullable: true, maxLength: 100, example: null }
+        postal_code: { type: string, maxLength: 20, example: SW1A 2AA }
+        country_code:
+          type: string
+          pattern: '^[A-Za-z]{2}$'
+          description: A 2-letter country code (stored in capitals).
+          example: GB
+
+    PaymentInput:
+      type: object
+      required: [cardholder_name, card_number, expiry_month, expiry_year, cvc]
+      properties:
+        cardholder_name: { type: string, example: Ada Lovelace }
+        card_number:
+          type: string
+          pattern: '^[0-9\s-]+$'
+          description: |
+            A string (a JSON number could lose digits). Spaces and hyphens are
+            allowed. Must be 12-19 digits and pass the Luhn check.
+          example: 4242 4242 4242 4242
+        expiry_month: { type: integer, minimum: 1, maximum: 12, example: 12 }
+        expiry_year:
+          type: integer
+          minimum: 1000
+          maximum: 9999
+          description: A 4-digit year. The card mustn't have expired.
+          example: 2030
+        cvc:
+          type: string
+          pattern: '^\d{3,4}$'
+          description: 3 or 4 digits, as a string (codes can start with 0).
+          example: '123'
+
+    CheckoutInput:
+      type: object
+      required: [shipping_address, payment]
+      properties:
+        shipping_address:
+          $ref: '#/components/schemas/ShippingAddressInput'
+        payment:
+          $ref: '#/components/schemas/PaymentInput'
+
+    # --- Orders -------------------------------------------------------------
+
+    Address:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        line_1: { type: string, example: 10 Downing Street }
+        line_2: { type: string, nullable: true, example: null }
+        city: { type: string, example: London }
+        region: { type: string, nullable: true, example: null }
+        postal_code: { type: string, example: SW1A 2AA }
+        country_code: { type: string, example: GB }
+
+    OrderItem:
+      type: object
+      properties:
+        product_id: { type: integer, example: 1 }
+        sku: { type: string, example: MUG-001 }
+        name: { type: string, example: Coffee Mug }
+        quantity: { type: integer, example: 2 }
+        unit_price:
+          type: string
+          description: The price paid, frozen at checkout.
+          example: '8.50'
+        line_total: { type: string, example: '17.00' }
+
+    # The values an order's status can take (the order_status enum in schema.sql).
+    OrderStatus:
+      type: string
+      enum: [pending, paid, shipped, delivered, cancelled]
+      example: paid
+
+    Order:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        total_amount: { type: string, example: '17.00' }
+        created_at: { type: string, format: date-time }
+        shipping_address:
+          $ref: '#/components/schemas/Address'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+
+    OrderSummary:
+      description: One order in the order history.
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        total_amount: { type: string, example: '17.00' }
+        item_count:
+          type: integer
+          description: The total quantity of items, e.g. 2 mugs + 1 teapot = 3.
+          example: 3
+        created_at: { type: string, format: date-time }

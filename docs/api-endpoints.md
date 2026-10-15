@@ -1,5 +1,10 @@
 # API Endpoints Plan
 
+> **For the current, complete API reference, use the Swagger documentation:** run the server
+> and open http://localhost:3000/api-docs. It's generated from `back-end/openapi.yaml`, which the
+> tests check against the real app. This file is the original plan, kept for its explanations of
+> the design decisions.
+
 The REST API endpoints the e-commerce app needs, based on the features in the
 [README](../README.md) and the [database design](database-design.md).
 

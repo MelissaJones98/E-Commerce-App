@@ -34,6 +34,7 @@ e-commerce-app/
 ├── back-end/
 │   ├── app.js              # Express app: middleware, routes and error handling
 │   ├── server.js           # Starts the server (entry point for npm start / npm run dev)
+│   ├── openapi.yaml        # OpenAPI spec: the API documentation Swagger UI displays
 │   ├── routes/
 │   │   ├── auth.js         # /auth routes (register, login, logout)
 │   │   ├── products.js     # /products routes (browse, create, update, retire)
@@ -68,6 +69,7 @@ e-commerce-app/
 │   │   ├── cart.test.js          # Tests for the /cart routes
 │   │   ├── checkout.test.js      # Tests for POST /cart/checkout
 │   │   ├── orders.test.js        # Tests for the /orders routes
+│   │   ├── docs.test.js          # Tests that the Swagger docs are served, valid and accurate
 │   │   ├── helpers.js      # Shared test helpers (e.g. emptying tables, logging in, adding test data)
 │   │   └── e2e/            # End-to-end tests, run by Newman against the running server
 │   │       └── ecommerce-api.e2e.postman_collection.json
@@ -174,6 +176,8 @@ npm start      # runs without auto-restart
 | `POST /cart/checkout` | Pays for your cart and turns it into an order (must be logged in) |
 | `GET /orders` | Gets your order history, newest first (must be logged in) |
 | `GET /orders/:orderId` | Gets one of your orders in full (must be logged in) |
+| `GET /api-docs` | Interactive API documentation (Swagger UI); see "API documentation" below |
+| `GET /api-docs/openapi.json` | The raw OpenAPI spec, for tools such as Postman |
 
 Visit http://localhost:3000/health in your browser to test it.
 
@@ -460,6 +464,48 @@ bought. They're created only by checking out.
 | `401 Unauthorized` | You aren't logged in |
 | `404 Not Found` | No order with that id, **or** it belongs to another customer |
 
+### API documentation (Swagger)
+With the server running, open **http://localhost:3000/api-docs** in your browser. This is
+**Swagger UI**: interactive documentation for every endpoint, grouped into sections (Health,
+Auth, Products, Account, Cart, Checkout, Orders). Click an endpoint to see:
+- what it does, and whether it needs a login (shown by a padlock);
+- the request body it expects, with an example and every rule (required fields, lengths,
+  formats);
+- every response it can return, with the status code, an explanation and an example body.
+
+**Trying endpoints from the page:** open an endpoint, click **Try it out**, edit the example
+body if you like, then click **Execute**. Swagger UI sends a real request to the server and
+shows the response. To use endpoints that need a login:
+1. Open **Auth → POST /auth/login**, click **Try it out**, enter an email and password you've
+   registered (or register first with **POST /auth/register**), and click **Execute**.
+2. The server replies with a session cookie, which your browser keeps and sends with every
+   later request from the page, so the padlocked endpoints now work. There's nothing to paste
+   into the **Authorize** button.
+
+These are real requests. On `npm run dev` they change your real `ecommerce` database, while on
+`npm run start:test` they change the test database.
+
+**How it's built:**
+- **The documentation is written in `back-end/openapi.yaml`.** It uses
+  [OpenAPI 3.0](https://swagger.io/specification/v3/), the standard, machine-readable format for
+  describing REST APIs. The file is commented throughout, explaining both the YAML format and
+  each part of OpenAPI (paths, parameters, request bodies, responses, schemas and `$ref`s).
+- **`app.js` loads it when the server starts** and serves it with
+  [swagger-ui-express](https://github.com/scottie1984/swagger-ui-express) at `/api-docs`.
+- **The same spec is available as JSON** at `/api-docs/openapi.json`. The Postman app can import
+  it: **File → Import**, paste `http://localhost:3000/api-docs/openapi.json`, and every endpoint
+  becomes a request.
+
+**Keeping it accurate:** when you add or change a route, update `openapi.yaml` too.
+`tests/docs.test.js` (part of `npm test`) checks that:
+- the spec is **valid OpenAPI**, using the validator library `@apidevtools/swagger-parser`;
+- every documented endpoint **really exists** in the app, so the docs can never describe a
+  route that isn't there;
+- every endpoint has a summary, a section, and a documented success response.
+
+The tests can't spot an endpoint that exists but **isn't** documented, so remember to document
+new routes.
+
 ### 6. Run the tests
 There are two kinds of automated test. Both are run from the `back-end` folder:
 
@@ -536,7 +582,7 @@ newman run tests/e2e/ecommerce-api.e2e.postman_collection.json
 checks. You can type the full command yourself with `npx newman run ...`. `npx` runs a tool
 installed in the project's `node_modules`.
 
-**What the collection does:** it walks through a shop's whole journey, in five folders:
+**What the collection does:** it walks through a shop's whole journey, in six folders:
 
 | Folder | Requests | Checks |
 |---|---|---|
@@ -545,9 +591,11 @@ installed in the project's `node_modules`.
 | 3. Cart | Create a test product (8.50, 5 in stock); view the empty cart; add 2; add 1 more; try to add 3 more; change the quantity to 1; remove it; remove it again; add it back; empty the cart; view it; view it logged out; retire the product | `201`; empty cart; total `17.00`; quantities added together to 3, total `25.50`; `409` (6 > 5 in stock); total `8.50`; `204`; `404`; `201`; `204`; empty cart; `401`; `204` |
 | 4. Delete account (clean-up) | Delete the account, then try to use it again | `204`, then `401` and `401` |
 | 5. Checkout and orders | Register and log in a second customer; create a product (8.50, 5 in stock); add 2 to the cart; check out with a mistyped card, then a declined card; view the cart; check out successfully; view the cart and the product's stock; view the order history and the order's details; view an order that doesn't exist; view the history logged out; check out the empty cart; check out logged out; try to delete the account | `201`, `200`, `201`, total `17.00`; `400`, `402`; cart still holds 2; `201` paid order for `17.00` with the card number never sent back; empty cart, stock down to 3; exactly one order (paid, `17.00`, 2 items), with details matching what checkout returned; `404`; `401`; `400`; `401`; `409` (order history is protected) |
+| 6. API documentation | Open the Swagger UI page; get the OpenAPI spec | `200` HTML page that loads Swagger UI; `200` OpenAPI 3.0 spec documenting the main endpoints |
 
 After **every** request, a collection-level check also confirms the response never contains
-a `password` or `password_hash`.
+a `password` or `password_hash`. The exception is the API documentation, which *describes* the
+password field without containing anyone's password, so it's skipped there.
 
 **What a passing run looks like:** Newman prints each request with a ✓ (`√` in Windows
 terminals) beside each passing check, then a summary table. A passing run has `0` in every row
@@ -556,9 +604,9 @@ of the **failed** column:
 ┌─────────────────────────┬───────────────────┬──────────────────┐
 │                         │          executed │           failed │
 ├─────────────────────────┼───────────────────┼──────────────────┤
-│                requests │                40 │                0 │
-│            test-scripts │                80 │                0 │
-│              assertions │               110 │                0 │
+│                requests │                42 │                0 │
+│            test-scripts │                84 │                0 │
+│              assertions │               115 │                0 │
 └─────────────────────────┴───────────────────┴──────────────────┘
 ```
 Newman exits with code `0` when everything passes and `1` when anything fails, so it can be
@@ -609,6 +657,7 @@ journey order.
 - React
 - Node.js test runner (`node:test`) and Supertest: unit and integration tests
 - Postman and Newman: end-to-end API tests
+- Swagger UI and OpenAPI 3.0: interactive API documentation
 
 ## Error Handling and Testing
 All errors are returned as JSON in the form `{ "error": "description of the problem" }`, with an
@@ -794,7 +843,7 @@ errors can reveal how the app works internally.
 
 ### Testing
 The API is built using test-driven development (TDD): each test is written first and run to
-confirm it fails, then just enough code is added to make it pass. There are 254 tests:
+confirm it fails, then just enough code is added to make it pass. There are 260 tests:
 - **Registration (27):** successful registration, duplicate accounts (including simultaneous
   requests), and each type of invalid input above
 - **Login and logout (17):** successful login, staying logged in across requests, the `HttpOnly`
@@ -819,13 +868,17 @@ confirm it fails, then just enough code is added to make it pass. There are 254 
   order details, details matching exactly what checkout returned, prices paid staying the same
   after price changes and retirements, login being required, other customers' orders being
   invisible and giving the same `404` as an order that doesn't exist, and invalid ids
+- **API documentation (6):** Swagger UI and the raw spec being served, the spec being valid
+  OpenAPI, every documented endpoint existing in the app, and every endpoint having a summary,
+  a section and a documented success response
 
 Every test runs against a real PostgreSQL test database, not mocks.
 
-On top of these, an **end-to-end test collection** run by Newman (40 requests, 110 checks) takes
+On top of these, an **end-to-end test collection** run by Newman (42 requests, 115 checks) takes
 customers through registering, logging in, viewing and updating their account, filling,
 changing and emptying their cart, deleting their account, checking out (including a
-mistyped card and a declined payment), and viewing their order history, using the real running server and the test
+mistyped card and a declined payment), and viewing their order history, then checks the API
+documentation is served, using the real running server and the test
 database. It also checks that no response ever contains
 a password. It has been confirmed to fail (exit code `1`) when the server isn't running, so a
 broken server can't produce a passing run.
