@@ -1,38 +1,51 @@
-.App {
-  text-align: center;
-}
+/* Styles for the Layout component: the header, the main nav and the page area.
+   (CSS comments use slash-star ... star-slash.) */
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
-}
-
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
+/* The header: the site name on the left, nav links on the right, in one row.
+   display: flex lines its children up in a row; justify-content spaces them out;
+   align-items centres them vertically; flex-wrap lets them wrap onto two lines on narrow screens. */
+.site-header {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  justify-content: space-between;
   align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
+  gap: 1rem; /* space between the site name and the nav (1rem = the root font size, ~16px) */
+  padding: 1rem 1.5rem; /* 1rem top and bottom, 1.5rem left and right */
+  border-bottom: 1px solid #ddd;
 }
 
-.App-link {
-  color: #61dafb;
+/* The site name: bold, and not underlined like a normal link. */
+.site-name {
+  font-weight: bold;
+  font-size: 1.25rem;
+  text-decoration: none;
+  color: inherit; /* use the surrounding text colour instead of link blue */
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+/* The list of nav links: in a row, with the bullet points and default list spacing removed. */
+.nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Every nav link. ".nav-links a" means "any <a> inside .nav-links" (NavLink draws an <a>). */
+.nav-links a {
+  text-decoration: none;
+  color: #1a4fa0;
+}
+
+/* The link to the current page. NavLink adds class="active" to it automatically.
+   ".nav-links a.active" means an <a> that has the class "active", inside .nav-links. */
+.nav-links a.active {
+  font-weight: bold;
+  text-decoration: underline;
+}
+
+/* The area where each page is drawn. */
+.page {
+  padding: 1.5rem;
 }

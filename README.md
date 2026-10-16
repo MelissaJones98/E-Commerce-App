@@ -76,6 +76,21 @@ e-commerce-app/
 │   ├── .env                # Your local settings (not committed, see below)
 │   ├── .env.test           # Test settings: test database name and a test-only session secret
 │   └── package.json
+├── front-end/              # React app (Create React App)
+│   ├── public/
+│   │   └── index.html      # The one HTML page; React draws everything inside it
+│   ├── src/
+│   │   ├── index.js        # Entry point: draws <App /> into index.html
+│   │   ├── App.js          # Builds the browser router from the route table
+│   │   ├── App.css         # Styles for the header, nav and page area
+│   │   ├── routes.js       # Route table: which page to show for each URL
+│   │   ├── components/
+│   │   │   └── Layout.js   # Header, main nav and the area where each page appears
+│   │   ├── pages/          # One component per page (placeholders for now)
+│   │   ├── routes.test.js  # Tests for every page URL and the navigation
+│   │   ├── App.test.js     # Tests that App shows the home page
+│   │   └── setupTests.js   # Test setup: jest-dom matchers and a TextEncoder polyfill
+│   └── package.json
 └── docs/
     ├── database-design.md  # Database design and ERD
     ├── api-endpoints.md    # REST API endpoints: built and planned
@@ -92,6 +107,8 @@ e-commerce-app/
 ```bash
 git clone <repository-url>
 cd e-commerce-app/back-end
+npm install
+cd ../front-end
 npm install
 ```
 
@@ -506,8 +523,40 @@ These are real requests. On `npm run dev` they change your real `ecommerce` data
 The tests can't spot an endpoint that exists but **isn't** documented, so remember to document
 new routes.
 
+### Front end (React)
+The front end is a React app in the `front-end` folder, made with Create React App. It uses
+[React Router](https://reactrouter.com/) (v7) to move between pages without reloading the site.
+So far it's a skeleton: each page is a placeholder that later tickets will connect to the API.
+
+Start it from the `front-end` folder:
+```bash
+npm start
+```
+This opens http://localhost:3000. The back end also uses port 3000, so if the server is
+running, Create React App asks to use another port (answer `y`). Connecting the two comes in a
+later ticket.
+
+| URL | Page |
+|---|---|
+| `/` | Products (the home page) |
+| `/products/:productId` | A single product |
+| `/register` | Register |
+| `/login` | Log in |
+| `/account` | Your account |
+| `/cart` | Your cart (links to checkout) |
+| `/checkout` | Checkout |
+| `/orders` | Your orders |
+| `/orders/:orderId` | A single order |
+| anything else | Page not found |
+
+The nav bar at the top links to the main pages and highlights the one you're on.
+
+**Why React Router v7, not the newest v8?** v8 is only published as ES modules, which the
+test runner built into Create React App (Jest 27) can't load. v7 works the same way for
+everything used here, so upgrading later is a small change.
+
 ### 6. Run the tests
-There are two kinds of automated test. Both are run from the `back-end` folder:
+The back end has two kinds of automated test. Both are run from the `back-end` folder:
 
 | | Unit and integration tests | End-to-end (E2E) tests |
 |---|---|---|
@@ -517,6 +566,15 @@ There are two kinds of automated test. Both are run from the `back-end` folder:
 | **Server** | Not needed: the tests load the app directly | Must be running, started with `npm run start:test` |
 | **Database** | `ecommerce_test`, emptied before every test | `ecommerce_test` too (via `npm run start:test`) |
 | **Checks** | Each route's behaviour in detail, including edge cases | One complete customer journey through the real running server |
+
+The front end has its own tests, run from the `front-end` folder:
+```bash
+npm test -- --watchAll=false
+```
+They use Jest and [React Testing Library](https://testing-library.com/docs/react-testing-library/intro/),
+which come with Create React App. They draw each page in a fake browser (no server needed) and
+click links the way a person would. Without `--watchAll=false`, `npm test` stays open and
+reruns the tests whenever you save a file.
 
 #### Unit and integration tests
 These tests use a separate `ecommerce_test` database, so they never touch your real data.
@@ -655,7 +713,9 @@ journey order.
 - HTML
 - CSS
 - React
+- React Router: moving between pages in the React app
 - Node.js test runner (`node:test`) and Supertest: unit and integration tests
+- Jest and React Testing Library: front-end tests
 - Postman and Newman: end-to-end API tests
 - Swagger UI and OpenAPI 3.0: interactive API documentation
 
@@ -882,6 +942,13 @@ documentation is served, using the real running server and the test
 database. It also checks that no response ever contains
 a password. It has been confirmed to fail (exit code `1`) when the server isn't running, so a
 broken server can't produce a passing run.
+
+The **front end** has 29 tests (Jest and React Testing Library): every page URL showing the
+right page (one `<h1>` each), product and order ids read from the URL, unknown URLs (including
+extra segments after a real page) showing "Page not found" with the nav still there, every nav
+link opening its page, the current page's link marked active, links from the cart to checkout
+and from "not found" back to the shop, trailing slashes, query strings, going back in history, and
+the real `App` showing the home page.
 
 See [Run the tests](#6-run-the-tests) for how to run both.
 
