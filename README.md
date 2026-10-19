@@ -969,10 +969,11 @@ database. It also checks that no response ever contains
 a password. It has been confirmed to fail (exit code `1`) when the server isn't running, so a
 broken server can't produce a passing run.
 
-The **front end** has 40 tests (Jest and React Testing Library). The registration form's 11
+The **front end** has 41 tests (Jest and React Testing Library). The registration form's 12
 tests check its fields, the link to log in, the exact request sent (never the confirm
 password), mismatched passwords, API and network errors (including the dev proxy's own error
-page), the button while sending, double-clicks, and retrying after an error. The API is
+page), the button while sending, double-clicks, and retrying after a password mismatch or an
+API error. The API is
 replaced by a fake `fetch`, so no server is needed. The other 29 check every page URL showing the
 right page (one `<h1>` each), product and order ids read from the URL, unknown URLs (including
 extra segments after a real page) showing "Page not found" with the nav still there, every nav

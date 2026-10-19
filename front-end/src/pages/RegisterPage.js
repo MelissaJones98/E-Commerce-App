@@ -58,14 +58,18 @@ export default function RegisterPage() {
       return;
     }
 
-    // "busy" state 
-    setError(null); // clears an old error message 
-    setSubmitting(true); // disables the submit button and shows "Creating account..." so the user knows something is happening
+    // "busy" state
+    setError(null); // clears an old error message
+    // disables the submit button and shows "Creating account…" so the user knows something is
+    // happening
+    setSubmitting(true);
 
     try {
-      const { confirm_password, ...details } = form; // take confirm_password out of form then save the rest in a new object called 'details'
+      // take confirm_password out of form, then save the rest in a new object called 'details'
+      const { confirm_password, ...details } = form;
       await register(details);
-      navigate('/'); // user sees the products page after a successful log in
+      // registering also logs the user in, so they go straight to the products page
+      navigate('/');
     } catch (err) {
       setError(err.message); // show error and stop
       setSubmitting(false); // resets the submit button so the user can try again

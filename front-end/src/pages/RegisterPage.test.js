@@ -227,3 +227,53 @@ test('lets you fix a mistake and register successfully', async () => {
 
   expect(await screen.findByRole('heading', { level: 1, name: 'Products' })).toBeInTheDocument();
 });
+
+test('after an API error, you can change your details and retry successfully', async () => {
+  // The retry's response is held back until we release it, so the test can look at the page
+  // while that request is still in flight. `new Promise((resolve) => ...)` hands us the
+  // promise's resolve function; calling releaseRetry(response) later settles it.
+  let releaseRetry;
+  const retryResponse = new Promise((resolve) => {
+    releaseRetry = resolve;
+  });
+  // mockResolvedValueOnce / mockReturnValueOnce set the result of one call each, in order:
+  // the first fetch gets a 409, the second gets the held-back promise.
+  global.fetch
+    .mockResolvedValueOnce(jsonResponse(409, { error: 'An account with this email already exists' }))
+    .mockReturnValueOnce(retryResponse);
+  renderAt('/register');
+  await screen.findByLabelText('First name');
+
+  // First attempt: the API says the email is taken.
+  fillForm();
+  clickRegister();
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'An account with this email already exists',
+  );
+
+  // Change the email and try again. clickRegister() finds the button by the name "Register",
+  // so this also checks the button went back to normal after the error.
+  userEvent.clear(screen.getByLabelText('Email'));
+  userEvent.type(screen.getByLabelText('Email'), 'ada.lovelace@example.com');
+  clickRegister();
+
+  // While the retry is in flight, the old error has gone. queryBy... returns null instead of
+  // throwing when nothing matches, so it can check something is NOT on the page.
+  expect(await screen.findByRole('button', { name: 'Creating account…' })).toBeDisabled();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+  // Let the retry succeed: the customer lands on the Products page.
+  releaseRetry(
+    jsonResponse(201, {
+      id: 1,
+      first_name: 'Ada',
+      last_name: 'Lovelace',
+      email: 'ada.lovelace@example.com',
+    }),
+  );
+  expect(await screen.findByRole('heading', { level: 1, name: 'Products' })).toBeInTheDocument();
+
+  // Two requests in total, and the second one sent the corrected email.
+  expect(global.fetch).toHaveBeenCalledTimes(2);
+  expect(JSON.parse(global.fetch.mock.calls[1][1].body).email).toBe('ada.lovelace@example.com');
+});
