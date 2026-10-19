@@ -49,3 +49,42 @@
 .page {
   padding: 1.5rem;
 }
+
+/* The registration form (and later forms): labels and inputs stacked in one column.
+   flex-direction: column stacks children vertically instead of in a row. */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 24rem; /* forms are easier to fill in when they're not too wide */
+}
+
+/* A little space above each label, so each field's label and input read as a pair. */
+.form label {
+  margin-top: 0.75rem;
+  font-weight: bold;
+}
+
+/* Bigger, easier-to-tap inputs and button. `font: inherit` uses the page's font, not the
+   browser's default for form controls. */
+.form input,
+.form button {
+  padding: 0.5rem;
+  font: inherit;
+}
+
+.form button {
+  margin-top: 1rem;
+  cursor: pointer;
+}
+
+/* While submitting, the button is disabled: show it faded, with a "wait" cursor. */
+.form button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+/* Error messages in red. */
+.form-error {
+  color: #b00020;
+}

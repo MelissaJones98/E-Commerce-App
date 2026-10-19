@@ -130,7 +130,9 @@ paths:
         Creates a customer. The email is the account's unique identifier; it's
         trimmed and lower-cased before saving, so `Ada@Example.com` and
         `ada@example.com` are the same account. The password is stored only as
-        a bcrypt hash and is never returned. Registering doesn't log you in.
+        a bcrypt hash and is never returned. Registering also logs you in: the
+        response sets the session cookie (`connect.sid`), so you don't need to
+        call `POST /auth/login` afterwards.
       requestBody:
         required: true
         content:
@@ -139,7 +141,14 @@ paths:
               $ref: '#/components/schemas/RegisterInput'
       responses:
         '201':
-          description: The account was created.
+          description: The account was created, and you're now logged in.
+          # The session cookie, exactly as POST /auth/login sets it.
+          headers:
+            Set-Cookie:
+              description: The session cookie, marked HttpOnly so page scripts can't read it.
+              schema:
+                type: string
+                example: connect.sid=s%3Aabc123; Path=/; HttpOnly
           content:
             application/json:
               schema:

@@ -2,33 +2,21 @@
 //
 // These tests use the SAME route table the real app uses (routes.js), but put it inside a
 // "memory router": a router that keeps its URL history in memory instead of the browser's
-// address bar. That lets each test start at any URL, with no browser and no server.
+// address bar. That lets each test start at any URL, with no browser and no server. The helper
+// that does this, renderAt(), lives in test-utils.js so other test files can use it too.
 
 // `import { a, b } from '...'` is a "named import": it picks exports out of a module by name.
-// render() draws a component into a fake page (jsdom); screen searches that page; within()
-// searches inside one part of it; act() waits for React to finish updating.
-import { act, render, screen, within } from '@testing-library/react';
+// screen searches the fake page (jsdom); within() searches inside one part of it; act() waits
+// for React to finish updating.
+import { act, screen, within } from '@testing-library/react';
 // `import x from '...'` (no braces) is a "default import": the module's main export.
 // userEvent simulates a real person, e.g. clicking a link.
 import userEvent from '@testing-library/user-event';
-// createMemoryRouter builds a router from a route table; RouterProvider shows its current page.
-import { createMemoryRouter, RouterProvider } from 'react-router';
-// The app's real route table, the thing under test.
-import { routes } from './routes';
+// renderAt(url) shows the app's real routes at `url` (see test-utils.js). It returns the
+// router, so a test can drive it directly (e.g. press "Back" with router.navigate(-1)).
+import { renderAt } from './test-utils';
 
-// Helper: show the app as if the browser had opened `url`.
-// `function name(params) { ... }` declares a function. It returns the router so a test can
-// drive it directly (e.g. press "Back" with router.navigate(-1)).
-function renderAt(url) {
-  // initialEntries is the starting history: a list of URLs, and the last one is the current page.
-  const router = createMemoryRouter(routes, { initialEntries: [url] });
-  // <RouterProvider router={router} /> is JSX: HTML-like syntax for creating React elements.
-  // `router={router}` passes the router to the component as a "prop" (an input).
-  render(<RouterProvider router={router} />);
-  return router;
-}
-
-// Helper: find the main nav bar. `async` marks a function that uses `await`; `await` pauses
+// Helper: find the main nav bar. `function name(params) { ... }` declares a function. `async` marks a function that uses `await`; `await` pauses
 // until a Promise (a value that arrives later) is ready. findBy... queries keep retrying for a
 // short time, which suits React Router because it can update the page a moment after a click.
 async function findNav() {

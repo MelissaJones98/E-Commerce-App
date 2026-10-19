@@ -4,8 +4,11 @@
 
 // express: the web framework, used here to create a router.
 import express from 'express';
-// bcrypt: turns passwords into one-way "hashes" that are safe to store.
-import bcrypt from 'bcrypt';
+// bcryptjs: turns passwords into one-way "hashes" that are safe to store.
+// It's a pure-JavaScript version of bcrypt (no C++ add-on to compile), with
+// the same functions, and it makes hashes the original package can read.
+// `import bcrypt from ...` names it `bcrypt`, so the code below reads the same.
+import bcrypt from 'bcryptjs';
 // query(): runs SQL against PostgreSQL (see db/index.js).
 import { query } from '../db/index.js';
 // Passport, configured with our login check (see config/passport.js).
@@ -51,11 +54,13 @@ const validateRegistration = (details) => {
 };
 
 // ---------------------------------------------------------------------------
-// POST /auth/register: create a new customer account.
+// POST /auth/register: create a new customer account and log them in.
 // ---------------------------------------------------------------------------
 // `async` lets this function use `await` to wait for slow operations
 // (hashing, database queries) without blocking other requests.
-router.post('/register', async (req, res) => {
+// `next` is provided by Express; calling next(err) passes an error on to the
+// error handler in app.js.
+router.post('/register', async (req, res, next) => {
   // req.body is the parsed JSON body. It's undefined if the request had no
   // body at all, so `?? {}` substitutes an empty object (`??` means "use the
   // right side if the left side is null or undefined").
@@ -77,6 +82,9 @@ router.post('/register', async (req, res) => {
   // different hashes. bcrypt.compare() can later check a password against it.
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
+  // `let` declares a variable that CAN be reassigned (unlike `const`). It's
+  // declared out here so the code after the try/catch can use it.
+  let customer;
   try {
     // INSERT adds a new row. $1–$4 are placeholders, filled in safely from the
     // array below in order. RETURNING sends back the new row's details,
@@ -88,21 +96,32 @@ router.post('/register', async (req, res) => {
        RETURNING id, first_name, last_name, email`,
       [first_name, last_name, email, passwordHash]
     );
-    // 201 Created: a new resource was made. Send back the new customer.
-    res.status(201).json(result.rows[0]);
+    customer = result.rows[0];
   } catch (err) {
     // If the email is already registered, the database's UNIQUE constraint
     // rejects the INSERT. We rely on that rather than checking first with a
     // SELECT: if two identical requests arrive at the same moment, both could
     // pass a SELECT check, but only one can pass the constraint.
     if (err.code === UNIQUE_VIOLATION) {
-      // 409 Conflict: clashes with existing data.
+      // 409 Conflict: clashes with existing data. Nobody is logged in.
       return res.status(409).json({ error: 'An account with this email already exists' });
     }
     // Any other error is unexpected: re-throw it so app.js's error handler
     // logs it and sends a 500.
     throw err;
   }
+
+  // Sign the new customer in straight away, exactly as POST /auth/login does.
+  // req.login() (added by Passport) saves the customer's id in the session and
+  // gives the session a brand-new ID, which protects against "session
+  // fixation". The browser receives the session cookie with this response.
+  // It reports when it's finished by calling the function we pass it.
+  req.login(customer, (err) => {
+    // Saving the session failed (unexpected): let app.js reply 500.
+    if (err) return next(err);
+    // 201 Created: a new resource was made. Send back the new customer.
+    res.status(201).json(customer);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -19,8 +19,9 @@ import { describe, test, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 // supertest sends HTTP requests straight to the app, without starting a server.
 import request from 'supertest';
-// bcrypt is used to check the stored password hash really matches the password.
-import bcrypt from 'bcrypt';
+// bcryptjs (pure-JavaScript bcrypt) is used to check the stored password hash
+// really matches the password. Imported under the name `bcrypt`.
+import bcrypt from 'bcryptjs';
 
 import app from '../app.js';
 // pool: the database connection pool, used to read what was actually saved.
@@ -125,6 +126,67 @@ describe('POST /auth/register', () => {
         assert.equal(res.status, 201);
       });
     }
+  });
+
+  describe('signing in', () => {
+    // These tests use request.agent(app): an "agent" keeps cookies between
+    // requests like a browser does. So if registering sets a session cookie,
+    // the agent's NEXT request is made as the new customer.
+
+    test('sets a session cookie when the account is created', async () => {
+      const res = await register(validUser);
+
+      assert.equal(res.status, 201);
+      // res.headers['set-cookie'] is a list of the cookies the server set, or
+      // undefined if it set none. `?? []` turns undefined into an empty list.
+      const cookies = res.headers['set-cookie'] ?? [];
+      // .some(fn) is true if fn returns true for at least one item.
+      // express-session names its cookie connect.sid.
+      assert.ok(cookies.some((cookie) => cookie.startsWith('connect.sid=')));
+    });
+
+    test('logs the new customer in, so GET /account works straight away', async () => {
+      const agent = request.agent(app);
+
+      const res = await agent.post('/auth/register').send(validUser);
+      // No POST /auth/login: the registration alone must have logged us in.
+      const account = await agent.get('/account');
+
+      assert.equal(account.status, 200);
+      // The account is the customer who just registered (phone is null
+      // because registration doesn't ask for one).
+      assert.deepEqual(account.body, {
+        id: res.body.id,
+        first_name: 'Ada',
+        last_name: 'Lovelace',
+        email: 'ada@example.com',
+        phone: null,
+      });
+    });
+
+    test('does not log anyone in when the details are invalid (400)', async () => {
+      const agent = request.agent(app);
+
+      const res = await agent.post('/auth/register').send({ ...validUser, password: 'short' });
+
+      assert.equal(res.status, 400);
+      // No cookie set, and the agent is still logged out.
+      assert.equal(res.headers['set-cookie'], undefined);
+      assert.equal((await agent.get('/account')).status, 401);
+    });
+
+    test('does not log anyone in when the email is taken (409)', async () => {
+      // Someone has already registered this email.
+      await register(validUser);
+      const agent = request.agent(app);
+
+      const res = await agent.post('/auth/register').send(validUser);
+
+      assert.equal(res.status, 409);
+      assert.equal(res.headers['set-cookie'], undefined);
+      // In particular, the agent must NOT be logged in as the existing customer.
+      assert.equal((await agent.get('/account')).status, 401);
+    });
   });
 
   describe('when the customer already exists', () => {

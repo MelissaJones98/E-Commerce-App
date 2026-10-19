@@ -91,6 +91,9 @@ Response `201`:
 ```json
 { "id": 1, "first_name": "Ada", "last_name": "Lovelace", "email": "ada@example.com" }
 ```
+The `201` response also sets the session cookie: **registering logs you in**, so there's no need
+to call `/auth/login` straight afterwards.
+
 Errors: `400` missing fields or password too short, `409` email already registered.
 
 `POST /auth/login` request: `{ "email": "...", "password": "..." }`.

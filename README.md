@@ -82,15 +82,20 @@ e-commerce-app/
 │   ├── src/
 │   │   ├── index.js        # Entry point: draws <App /> into index.html
 │   │   ├── App.js          # Builds the browser router from the route table
-│   │   ├── App.css         # Styles for the header, nav and page area
+│   │   ├── App.css         # Styles for the header, nav, page area and forms
 │   │   ├── routes.js       # Route table: which page to show for each URL
+│   │   ├── api/
+│   │   │   └── auth.js     # Calls the API's /auth endpoints (register)
 │   │   ├── components/
 │   │   │   └── Layout.js   # Header, main nav and the area where each page appears
-│   │   ├── pages/          # One component per page (placeholders for now)
+│   │   ├── pages/          # One component per page (Register works; the rest are placeholders)
+│   │   │   └── RegisterPage.test.js # Tests for the registration form
 │   │   ├── routes.test.js  # Tests for every page URL and the navigation
 │   │   ├── App.test.js     # Tests that App shows the home page
+│   │   ├── test-utils.js   # Shared test helper: renders the app at any URL
 │   │   └── setupTests.js   # Test setup: jest-dom matchers and a TextEncoder polyfill
-│   └── package.json
+│   ├── .env.development    # Dev server settings: runs React on port 3001
+│   └── package.json        # Also holds "proxy": passes API requests on to port 3000
 └── docs/
     ├── database-design.md  # Database design and ERD
     ├── api-endpoints.md    # REST API endpoints: built and planned
@@ -211,11 +216,12 @@ with **Body → raw → JSON**:
 ```
 | Response | When |
 |---|---|
-| `201 Created` | The account was created. Returns the new customer (never the password) |
+| `201 Created` | The account was created **and you're logged in** (the response sets the session cookie). Returns the new customer (never the password) |
 | `400 Bad Request` | A field is missing or invalid: e.g. a malformed email, or a password under 8 characters or over 72 bytes |
 | `409 Conflict` | An account with that email already exists (emails are case-insensitive) |
 
-This creates a real account in your `ecommerce` database.
+You don't need to call `/auth/login` after registering. A failed registration (`400` or `409`)
+logs no one in. This creates a real account in your `ecommerce` database.
 
 #### Log in
 Send a **POST** request to `http://localhost:3000/auth/login` with **Body → raw → JSON**:
@@ -526,21 +532,39 @@ new routes.
 ### Front end (React)
 The front end is a React app in the `front-end` folder, made with Create React App. It uses
 [React Router](https://reactrouter.com/) (v7) to move between pages without reloading the site.
-So far it's a skeleton: each page is a placeholder that later tickets will connect to the API.
+The Register page is connected to the API; the other pages are still placeholders that later
+tickets will connect.
 
-Start it from the `front-end` folder:
+Start the API first (`npm run dev` in the `back-end` folder), then start the front end from the
+`front-end` folder:
 ```bash
 npm start
 ```
-This opens http://localhost:3000. The back end also uses port 3000, so if the server is
-running, Create React App asks to use another port (answer `y`). Connecting the two comes in a
-later ticket.
+This opens **http://localhost:3001** (the port is set in `front-end/.env.development`, because
+the API uses 3000).
+
+**How the front end reaches the API:** the `"proxy"` setting in `front-end/package.json` makes
+the React dev server pass any request it can't answer itself (e.g. `POST /auth/register`) on to
+`http://localhost:3000`. So the browser only ever talks to one address, and the API's session
+cookie works with no extra setup. Page addresses typed into the browser ask for HTML, and those
+are always answered by React, never passed to the API. That's why `/account` can be both a page
+and an API endpoint.
+
+`.env.development` also sets `DANGEROUSLY_DISABLE_HOST_CHECK=true`. Without it, Create React
+App crashes on start (`options.allowedHosts[0] should be a non-empty string`) on computers
+whose network address isn't a typical home or office one (e.g. on a VPN such as Tailscale).
+It only affects `npm start`, never the production build. The trade-off: the dev server's host
+check guards against "DNS rebinding" (a malicious website tricking your browser into sending
+requests to `localhost`), and with the proxy on, those requests could reach the API through
+port 3001. The risk is low for local development (such a page can't use your `localhost`
+session cookie), but if your computer has a normal home or office address you can delete this
+line to keep the check on.
 
 | URL | Page |
 |---|---|
 | `/` | Products (the home page) |
 | `/products/:productId` | A single product |
-| `/register` | Register |
+| `/register` | Register: create an account (signs you in, then goes to Products) |
 | `/login` | Log in |
 | `/account` | Your account |
 | `/cart` | Your cart (links to checkout) |
@@ -662,9 +686,9 @@ of the **failed** column:
 ┌─────────────────────────┬───────────────────┬──────────────────┐
 │                         │          executed │           failed │
 ├─────────────────────────┼───────────────────┼──────────────────┤
-│                requests │                42 │                0 │
-│            test-scripts │                84 │                0 │
-│              assertions │               115 │                0 │
+│                requests │                43 │                0 │
+│            test-scripts │                86 │                0 │
+│              assertions │               119 │                0 │
 └─────────────────────────┴───────────────────┴──────────────────┘
 ```
 Newman exits with code `0` when everything passes and `1` when anything fails, so it can be
@@ -714,6 +738,7 @@ journey order.
 - CSS
 - React
 - React Router: moving between pages in the React app
+- bcryptjs: password hashing (pure-JavaScript bcrypt)
 - Node.js test runner (`node:test`) and Supertest: unit and integration tests
 - Jest and React Testing Library: front-end tests
 - Postman and Newman: end-to-end API tests
@@ -903,9 +928,10 @@ errors can reveal how the app works internally.
 
 ### Testing
 The API is built using test-driven development (TDD): each test is written first and run to
-confirm it fails, then just enough code is added to make it pass. There are 260 tests:
-- **Registration (27):** successful registration, duplicate accounts (including simultaneous
-  requests), and each type of invalid input above
+confirm it fails, then just enough code is added to make it pass. There are 264 tests:
+- **Registration (31):** successful registration, being logged in straight away (and not after
+  a failed registration), duplicate accounts (including simultaneous requests), and each type of
+  invalid input above
 - **Login and logout (17):** successful login, staying logged in across requests, the `HttpOnly`
   session cookie, identical errors for a wrong password and an unknown email, missing details,
   and logging out
@@ -934,8 +960,8 @@ confirm it fails, then just enough code is added to make it pass. There are 260 
 
 Every test runs against a real PostgreSQL test database, not mocks.
 
-On top of these, an **end-to-end test collection** run by Newman (42 requests, 115 checks) takes
-customers through registering, logging in, viewing and updating their account, filling,
+On top of these, an **end-to-end test collection** run by Newman (43 requests, 119 checks) takes
+customers through registering (and being logged in straight away), logging in, viewing and updating their account, filling,
 changing and emptying their cart, deleting their account, checking out (including a
 mistyped card and a declined payment), and viewing their order history, then checks the API
 documentation is served, using the real running server and the test
@@ -943,7 +969,11 @@ database. It also checks that no response ever contains
 a password. It has been confirmed to fail (exit code `1`) when the server isn't running, so a
 broken server can't produce a passing run.
 
-The **front end** has 29 tests (Jest and React Testing Library): every page URL showing the
+The **front end** has 40 tests (Jest and React Testing Library). The registration form's 11
+tests check its fields, the link to log in, the exact request sent (never the confirm
+password), mismatched passwords, API and network errors (including the dev proxy's own error
+page), the button while sending, double-clicks, and retrying after an error. The API is
+replaced by a fake `fetch`, so no server is needed. The other 29 check every page URL showing the
 right page (one `<h1>` each), product and order ids read from the URL, unknown URLs (including
 extra segments after a real page) showing "Page not found" with the nav still there, every nav
 link opening its page, the current page's link marked active, links from the cart to checkout

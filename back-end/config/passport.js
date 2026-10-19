@@ -13,8 +13,9 @@ import passport from 'passport';
 // `{ Strategy as LocalStrategy }` imports the export named Strategy and calls
 // it LocalStrategy in this file, which reads more clearly.
 import { Strategy as LocalStrategy } from 'passport-local';
-// bcrypt: used here to check a password against its stored hash.
-import bcrypt from 'bcrypt';
+// bcryptjs (pure-JavaScript bcrypt): used here to check a password against its
+// stored hash. Imported under the name `bcrypt`.
+import bcrypt from 'bcryptjs';
 // query(): runs SQL against PostgreSQL (see db/index.js).
 import { query } from '../db/index.js';
 // normalizeEmail(): trims and lower-cases an email, the same way registration does.
