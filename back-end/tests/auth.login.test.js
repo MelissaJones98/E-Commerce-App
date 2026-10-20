@@ -188,6 +188,28 @@ describe('POST /auth/login', () => {
       assert.equal(typeof res.body.error, 'string');
     });
   });
+
+  // Customers who only sign in with Google or Facebook have no password:
+  // their password_hash is NULL in the database.
+  describe('customers without a password', () => {
+    test('logging in with the email form gives 401, not 500', async () => {
+      // Add the customer straight into the database, as Google sign-in would.
+      // NULL is SQL's "no value".
+      await pool.query(
+        `INSERT INTO customers (first_name, last_name, email, password_hash)
+         VALUES ('Grace', 'Hopper', 'grace@example.com', NULL)`
+      );
+
+      const res = await newAgent()
+        .post('/auth/login')
+        .send({ email: 'grace@example.com', password: 'anything-at-all' });
+
+      // The same reply as any wrong password, so nobody can tell this account
+      // exists or has no password.
+      assert.equal(res.status, 401);
+      assert.equal(res.body.error, 'Incorrect email or password');
+    });
+  });
 });
 
 describe('POST /auth/logout', () => {

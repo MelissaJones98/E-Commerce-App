@@ -14,6 +14,7 @@ erDiagram
     CATEGORIES |o--o{ PRODUCTS : "groups"
     CUSTOMERS ||--o{ CART_ITEMS : "has in cart"
     PRODUCTS ||--o{ CART_ITEMS : "is in"
+    CUSTOMERS ||--o{ FEDERATED_CREDENTIALS : "signs in with"
 
     CUSTOMERS {
         int id PK
@@ -24,6 +25,13 @@ erDiagram
         varchar phone
         timestamptz created_at
         timestamptz updated_at
+    }
+
+    FEDERATED_CREDENTIALS {
+        varchar provider PK
+        varchar subject PK
+        int customer_id FK
+        timestamptz created_at
     }
 
     ADDRESSES {
@@ -140,6 +148,7 @@ circle + crow's foot at the ORDERS end.
 | Order ↔ Products | Many-to-many: an order holds many products, a product appears in many orders | `order_items` join table |
 | Category → Products | One category groups zero or many products; a product is in zero or one category | `products.category_id` (nullable) |
 | Customer ↔ Products (cart) | Many-to-many: a customer's cart holds many products, a product can be in many carts | `cart_items` join table |
+| Customer → Google/Facebook accounts | One customer can be linked to zero or more provider accounts (e.g. one Google and one Facebook); each provider account links to exactly one customer | `federated_credentials.customer_id` |
 
 `order_items` isn't in the ticket's table list, but it's required: an order can't
 hold a list of products in a single column, so each line of an order (product +
@@ -155,10 +164,29 @@ quantity) gets its own row.
 | first_name | varchar(100) | NOT NULL |
 | last_name | varchar(100) | NOT NULL |
 | email | varchar(255) | NOT NULL, UNIQUE |
-| password_hash | varchar(255) | NOT NULL. Never store plain-text passwords |
+| password_hash | varchar(255) | nullable: `NULL` means the customer only signs in with Google or Facebook. A bcrypt hash; never store plain-text passwords |
 | phone | varchar(30) | nullable |
 | created_at | timestamptz | NOT NULL, default `now()` |
 | updated_at | timestamptz | NOT NULL, default `now()` |
+
+### federated_credentials
+
+Links a Google or Facebook account to a customer, so they can sign in with it ("federated"
+login: another service vouches for who the person is). Added by migration 003.
+
+| Column | Type | Constraints |
+|---|---|---|
+| customer_id | integer | NOT NULL, FK → `customers.id`, ON DELETE CASCADE |
+| provider | varchar(20) | NOT NULL, CHECK in (`'google'`, `'facebook'`) |
+| subject | varchar(255) | NOT NULL. The provider's own id for the person, which never changes (even if their email does) |
+| created_at | timestamptz | NOT NULL, default `now()` |
+
+- **Primary key `(provider, subject)`:** each provider account can be linked to only one
+  customer. Signing in looks the person up by this pair first.
+- **Index on `customer_id`:** Postgres doesn't index foreign keys automatically; this speeds up
+  finding a customer's links and the cascade when a customer is deleted.
+- **Why a separate table** rather than `google_id` and `facebook_id` columns on `customers`: a
+  customer can link any number of providers, and adding a provider later needs no new column.
 
 ### addresses
 

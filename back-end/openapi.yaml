@@ -173,7 +173,8 @@ paths:
         session cookie (`connect.sid`), which the browser sends with every
         later request to identify you. A wrong password and an unknown email
         give exactly the same error, so the response never reveals which
-        emails are registered.
+        emails are registered. Accounts with no password (created by signing
+        in with Google or Facebook) also get that 401 here.
       requestBody:
         required: true
         content:
@@ -216,6 +217,90 @@ paths:
           description: Logged out. There is no response body.
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  # -------------------------------------------------------------------------
+  # Sign in with Google or Facebook
+  # -------------------------------------------------------------------------
+  # The four redirect routes below are visited by the browser, not called by
+  # code, so "Try it out" in Swagger UI can't follow them.
+  /auth/providers:
+    get:
+      tags: [Auth]
+      summary: Which sign-in providers are switched on
+      description: |
+        Tells the login page which "Sign in with..." buttons to show. A
+        provider is on when its keys are set in `back-end/.env`.
+      responses:
+        '200':
+          description: Whether each provider is switched on.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  google:
+                    type: boolean
+                  facebook:
+                    type: boolean
+              example:
+                google: true
+                facebook: false
+
+  /auth/google:
+    get:
+      tags: [Auth]
+      summary: Sign in with Google (browser redirect)
+      description: |
+        Sends the browser to Google's sign-in page. Afterwards Google sends it
+        back to `/auth/google/callback`.
+      responses:
+        '302':
+          $ref: '#/components/responses/RedirectToProvider'
+        '404':
+          $ref: '#/components/responses/ProviderNotSetUp'
+
+  /auth/google/callback:
+    get:
+      tags: [Auth]
+      summary: Return from Google (browser redirect)
+      description: |
+        Where Google sends the browser back. On success the customer is
+        logged in (the session cookie is set): the existing account with the
+        same verified email, or a new account with no password. Then the
+        browser goes to `/`. Otherwise it goes to
+        `/login?error=<code>&provider=google`, where `code` is `cancelled`,
+        `no_email`, `email_unverified` or `failed`.
+      responses:
+        '302':
+          $ref: '#/components/responses/RedirectAfterSignIn'
+        '404':
+          $ref: '#/components/responses/ProviderNotSetUp'
+
+  /auth/facebook:
+    get:
+      tags: [Auth]
+      summary: Sign in with Facebook (browser redirect)
+      description: |
+        Sends the browser to Facebook's sign-in page. Afterwards Facebook
+        sends it back to `/auth/facebook/callback`.
+      responses:
+        '302':
+          $ref: '#/components/responses/RedirectToProvider'
+        '404':
+          $ref: '#/components/responses/ProviderNotSetUp'
+
+  /auth/facebook/callback:
+    get:
+      tags: [Auth]
+      summary: Return from Facebook (browser redirect)
+      description: |
+        Where Facebook sends the browser back. Works like
+        `/auth/google/callback`, with `provider=facebook` on errors.
+      responses:
+        '302':
+          $ref: '#/components/responses/RedirectAfterSignIn'
+        '404':
+          $ref: '#/components/responses/ProviderNotSetUp'
 
   # -------------------------------------------------------------------------
   # Products
@@ -753,6 +838,31 @@ components:
             $ref: '#/components/schemas/Error'
           example:
             error: 'Not enough stock: 5 available, 3 already in your cart'
+    # Used by the Google and Facebook sign-in routes.
+    RedirectToProvider:
+      description: Redirects the browser to the provider's sign-in page.
+      headers:
+        Location:
+          description: The provider's sign-in address, with our client id, callback URL and a random state value.
+          schema:
+            type: string
+            example: https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=...
+    RedirectAfterSignIn:
+      description: Redirects the browser to the shop (signed in) or back to the login page (with an error code).
+      headers:
+        Location:
+          description: '`/` on success, otherwise `/login?error=<code>&provider=<provider>`.'
+          schema:
+            type: string
+            example: /login?error=cancelled&provider=google
+    ProviderNotSetUp:
+      description: This provider's keys aren't set in back-end/.env, so it's switched off.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Google sign-in is not set up
 
   # Schemas describe the shape of JSON bodies. In a schema:
   #   type          string, integer, number, boolean, array or object

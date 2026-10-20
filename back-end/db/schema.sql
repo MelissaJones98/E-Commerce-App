@@ -62,7 +62,9 @@ CREATE TABLE customers (
   -- UNIQUE: two customers can't register with the same email.
   email         varchar(255) NOT NULL UNIQUE,
   -- A bcrypt hash of the password, never the password itself.
-  password_hash varchar(255) NOT NULL,
+  -- NULL means the customer has no password: they only sign in with Google or
+  -- Facebook (see federated_credentials below).
+  password_hash varchar(255),
   -- No NOT NULL, so phone is optional (it can be NULL, meaning "no value").
   phone         varchar(30),
   created_at    timestamptz  NOT NULL DEFAULT now(),
@@ -75,6 +77,32 @@ CREATE TABLE customers (
 CREATE TRIGGER customers_set_updated_at
   BEFORE UPDATE ON customers
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- federated_credentials
+-- ---------------------------------------------------------------------------
+-- Links a Google or Facebook account to a customer ("federated" login means
+-- another service vouches for who you are). Each row says "this person at
+-- this provider is this customer". A customer can have several rows, e.g.
+-- one for Google and one for Facebook.
+
+CREATE TABLE federated_credentials (
+  -- ON DELETE CASCADE: deleting a customer deletes their links too.
+  customer_id integer      NOT NULL REFERENCES customers (id) ON DELETE CASCADE,
+  -- CHECK (...): the database rejects any provider not in this list.
+  provider    varchar(20)  NOT NULL CHECK (provider IN ('google', 'facebook')),
+  -- The provider's own id for this person. It never changes, even if they
+  -- change their email, so it's what we look them up by.
+  subject     varchar(255) NOT NULL,
+  created_at  timestamptz  NOT NULL DEFAULT now(),
+  -- A primary key made of two columns: each provider account can be linked
+  -- to only one customer.
+  PRIMARY KEY (provider, subject)
+);
+
+-- Postgres doesn't index foreign keys automatically; this speeds up finding a
+-- customer's links (and the cascade when a customer is deleted).
+CREATE INDEX federated_credentials_customer_id_idx ON federated_credentials (customer_id);
 
 -- ---------------------------------------------------------------------------
 -- addresses

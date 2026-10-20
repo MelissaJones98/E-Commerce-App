@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "E-Commerce API: End-to-End Tests",
-    "description": "End-to-end (E2E) tests for the e-commerce API.\n\n**What \"end-to-end\" means here:** these requests go over the network to the real running server, which talks to a real PostgreSQL database, the same way a browser or the Postman app would. That's different from the unit/integration tests in `tests/*.test.js` (run with `npm test`), which load the app directly in Node without starting a server.\n\n**Which database:** the server for these tests is started with `npm run start:test`, which uses the `ecommerce_test` database, NOT your real `ecommerce` one. That's because the checkout tests place an order, and orders are permanent history: the customer and product on an order can never be deleted, so a run can't fully clean up after itself. The test database is wiped by `npm test` and `npm run db:test:reset`, so leftovers there don't matter.\n\n**How to run:** start the server with `npm run start:test`, then from the `back-end` folder run `npm run test:e2e`. Newman (Postman's command-line runner) runs every request below, in order, top to bottom. You can also import this file into the Postman app (File → Import) and use its Collection Runner.\n\n**Order matters:** the requests form one journey. Register a customer (which also logs you in) → view the account → log in again → use the account → create a test product and use the cart → retire the product → delete the account → register a second customer → buy a product through checkout → view the order history → check the API documentation is served. Later requests rely on the session cookie saved by the login request, so run the whole collection, not single requests.\n\n**Cookies:** Newman (like Postman) keeps a cookie jar for the whole run, so after logging in every request automatically sends the session cookie. Requests that must be made logged-out switch cookies off for themselves (see each request's Settings → \"Disable cookie jar\", stored as `protocolProfileBehavior.disableCookies`).\n\n**What's left behind:** the first customer is deleted and their test product retired. The checkout customer, their order and address, and the product they bought stay in the test database (that's the point: orders are permanent). Every run uses unique emails and SKUs made from the current time, so leftovers never clash with the next run. Each run uses a unique email (`e2e.<timestamp>@example.invalid`; `.invalid` is a domain reserved for testing that can never be a real address), so if a run ever stops halfway, the leftover customer can't block the next run.\n\n**Variables** (collection variables, see the Variables tab):\n- `baseUrl`: where the server is running. Override with `--env-var baseUrl=...`.\n- `testEmail`, `testPassword`: the test customer's login details (`testEmail` is set fresh by the first request).\n- `customerId`: the test customer's id, saved after registration.\n- `testSku`, `productId`: the current test product's unique SKU and id, used by the cart and checkout requests.\n- `checkoutEmail`: the second customer's unique email, used by the checkout folder.\n- `orderId`, `checkoutOrder`: the order placed at checkout, read back by the order-history requests.",
+    "description": "End-to-end (E2E) tests for the e-commerce API.\n\n**What \"end-to-end\" means here:** these requests go over the network to the real running server, which talks to a real PostgreSQL database, the same way a browser or the Postman app would. That's different from the unit/integration tests in `tests/*.test.js` (run with `npm test`), which load the app directly in Node without starting a server.\n\n**Which database:** the server for these tests is started with `npm run start:test`, which uses the `ecommerce_test` database, NOT your real `ecommerce` one. That's because the checkout tests place an order, and orders are permanent history: the customer and product on an order can never be deleted, so a run can't fully clean up after itself. The test database is wiped by `npm test` and `npm run db:test:reset`, so leftovers there don't matter.\n\n**How to run:** start the server with `npm run start:test`, then from the `back-end` folder run `npm run test:e2e`. Newman (Postman's command-line runner) runs every request below, in order, top to bottom. You can also import this file into the Postman app (File → Import) and use its Collection Runner.\n\n**Order matters:** the requests form one journey. Register a customer (which also logs you in) → view the account → log in again → check which sign-in providers are on → use the account → create a test product and use the cart → retire the product → delete the account → register a second customer → buy a product through checkout → view the order history → check the API documentation is served. Later requests rely on the session cookie saved by the login request, so run the whole collection, not single requests.\n\n**Cookies:** Newman (like Postman) keeps a cookie jar for the whole run, so after logging in every request automatically sends the session cookie. Requests that must be made logged-out switch cookies off for themselves (see each request's Settings → \"Disable cookie jar\", stored as `protocolProfileBehavior.disableCookies`).\n\n**What's left behind:** the first customer is deleted and their test product retired. The checkout customer, their order and address, and the product they bought stay in the test database (that's the point: orders are permanent). Every run uses unique emails and SKUs made from the current time, so leftovers never clash with the next run. Each run uses a unique email (`e2e.<timestamp>@example.invalid`; `.invalid` is a domain reserved for testing that can never be a real address), so if a run ever stops halfway, the leftover customer can't block the next run.\n\n**Variables** (collection variables, see the Variables tab):\n- `baseUrl`: where the server is running. Override with `--env-var baseUrl=...`.\n- `testEmail`, `testPassword`: the test customer's login details (`testEmail` is set fresh by the first request).\n- `customerId`: the test customer's id, saved after registration.\n- `testSku`, `productId`: the current test product's unique SKU and id, used by the cart and checkout requests.\n- `checkoutEmail`: the second customer's unique email, used by the checkout folder.\n- `orderId`, `checkoutOrder`: the order placed at checkout, read back by the order-history requests.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -85,7 +85,7 @@
   "item": [
     {
       "name": "1. Register and log in",
-      "description": "Creates a brand-new test customer and logs in as them. The login response sets the session cookie that the rest of the journey relies on.",
+      "description": "Creates a brand-new test customer and logs in as them, then checks which sign-in providers (Google, Facebook) are switched on. The login response sets the session cookie that the rest of the journey relies on.",
       "item": [
         {
           "name": "Register a test customer",
@@ -236,6 +236,37 @@
             },
             "url": "{{baseUrl}}/auth/login",
             "description": "POST /auth/login: logs in as the test customer. Newman stores the session cookie from this response and sends it with every following request (unless that request disables cookies)."
+          }
+        },
+        {
+          "name": "Which sign-in providers are on",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The login page asks this to decide which 'Sign in with...' buttons to show.",
+                  "pm.test('status is 200 OK', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "// Each value is true or false, depending on whether that provider's keys",
+                  "// are set on the server, so check the type rather than the value.",
+                  "pm.test('says whether Google and Facebook are on (true or false)', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.google).to.be.a('boolean');",
+                  "  pm.expect(body.facebook).to.be.a('boolean');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/auth/providers",
+            "description": "GET /auth/providers: which of Google and Facebook sign-in are switched on. The sign-in redirects themselves need a real browser and a real Google or Facebook account, so they aren't part of this collection."
           }
         }
       ]

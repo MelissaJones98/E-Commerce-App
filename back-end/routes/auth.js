@@ -11,8 +11,9 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 // query(): runs SQL against PostgreSQL (see db/index.js).
 import { query } from '../db/index.js';
-// Passport, configured with our login check (see config/passport.js).
-import passport from '../config/passport.js';
+// Passport, configured with our login checks (see config/passport.js), and
+// which of Google and Facebook are switched on.
+import passport, { enabledProviders } from '../config/passport.js';
 // requireAuth: middleware that sends 401 if nobody is logged in.
 import { requireAuth } from '../middleware/require-auth.js';
 // normalizeEmail(): trims and lower-cases an email so " Ada@X.com " = "ada@x.com".
@@ -180,6 +181,86 @@ router.post('/logout', requireAuth, (req, res, next) => {
     res.sendStatus(204);
   });
 });
+
+// ---------------------------------------------------------------------------
+// GET /auth/providers: which "Sign in with..." buttons to show.
+// ---------------------------------------------------------------------------
+// Replies e.g. { google: true, facebook: false }. The login page only shows a
+// provider's button when it's switched on (its keys are set in back-end/.env).
+router.get('/providers', (req, res) => {
+  res.json(enabledProviders);
+});
+
+// ---------------------------------------------------------------------------
+// Sign in with Google or Facebook
+// ---------------------------------------------------------------------------
+// These routes are visited by the BROWSER (the customer clicks a link and is
+// redirected around), not called with fetch(), so they answer with redirects
+// rather than JSON:
+//   GET /auth/<provider>            sends the browser to Google or Facebook
+//   GET /auth/<provider>/callback   where Google or Facebook sends it back;
+//                                   we log the customer in and go to the shop
+// Both providers work the same way, so one function adds the routes for each.
+//   provider  'google' or 'facebook' (the strategy's name in Passport)
+//   name      'Google' or 'Facebook' (for messages)
+//   scope     what we ask the provider to share
+const addProviderRoutes = (provider, name, scope) => {
+  // Middleware that runs first on both routes: if this provider isn't set up,
+  // reply 404 instead of crashing. Otherwise next() moves on to the route.
+  const requireEnabled = (req, res, next) => {
+    if (!enabledProviders[provider]) {
+      return res.status(404).json({ error: `${name} sign-in is not set up` });
+    }
+    next();
+  };
+
+  // Step 1: Passport redirects the browser to the provider's sign-in page.
+  router.get(`/${provider}`, requireEnabled, (req, res, next) => {
+    passport.authenticate(provider, { scope })(req, res, next);
+  });
+
+  // Step 2: the provider sends the browser back here.
+  router.get(`/${provider}/callback`, requireEnabled, (req, res, next) => {
+    // Sends the browser back to the login page, which shows a message for
+    // `code`. The codes are fixed words, so they're safe to put in the address.
+    const backToLogin = (code) => res.redirect(`/login?error=${code}&provider=${provider}`);
+
+    // Passport swaps the provider's one-time code for the person's profile and
+    // runs our verify function (config/passport.js), then calls this function:
+    //   err       something unexpected went wrong
+    //   customer  the signed-in customer, or false if sign-in was refused
+    //   info      why it was refused, e.g. { code: 'no_email' }
+    passport.authenticate(provider, (err, customer, info) => {
+      if (err) {
+        // Log the details for us, but show the customer a general message.
+        console.error(err);
+        return backToLogin('failed');
+      }
+      if (!customer) {
+        // Our own refusal codes come in `info`. Otherwise, ?error=access_denied
+        // means the customer clicked "Cancel" at the provider; anything else
+        // (e.g. a state value that didn't match) is a general failure.
+        const code = info?.code ?? (req.query.error === 'access_denied' ? 'cancelled' : 'failed');
+        return backToLogin(code);
+      }
+
+      // Log them in, exactly as POST /auth/login does (a fresh session ID
+      // too), then send them to the shop's home page.
+      req.login(customer, (err) => {
+        // Rare (e.g. the session couldn't be saved). This is a browser visit, so send them
+        // back to the login page with a message rather than showing a JSON error page.
+        if (err) {
+          console.error(err);
+          return backToLogin('failed');
+        }
+        res.redirect('/');
+      });
+    })(req, res, next);
+  });
+};
+
+addProviderRoutes('google', 'Google', ['profile', 'email']);
+addProviderRoutes('facebook', 'Facebook', ['email']);
 
 // Make the router available to app.js.
 export default router;

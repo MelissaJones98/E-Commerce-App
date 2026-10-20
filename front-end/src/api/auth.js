@@ -12,22 +12,22 @@
 const NETWORK_ERROR = 'Could not reach the server. Please try again.';
 const GENERIC_ERROR = 'Something went wrong. Please try again.';
 
-// Creates an account and (because the API logs you in on registering) starts a session.
-// `details` is { first_name, last_name, email, password }.
+// Sends `body` as JSON in a POST request to `url`, and returns the API's JSON reply.
+// If anything goes wrong it throws an Error with a message ready to show the customer.
+// It isn't exported: only the functions below use it.
 // `async` makes the function return a Promise; `await` pauses until a Promise settles.
-// `export` lets other files import it: import { register } from '../api/auth'.
-export async function register(details) {
+async function postJson(url, body) {
   // `let` declares a variable that can be reassigned. Declared here so it can be used after
   // the try/catch below.
   let response;
   try {
     // fetch(url, options) sends an HTTP request and resolves to the response.
-    response = await fetch('/auth/register', {
+    response = await fetch(url, {
       method: 'POST',
       // Tells Express the body is JSON, so express.json() parses it into req.body.
       headers: { 'Content-Type': 'application/json' },
       // JSON.stringify turns the object into JSON text, e.g. '{"email":"ada@example.com",...}'.
-      body: JSON.stringify(details),
+      body: JSON.stringify(body),
     });
   } catch {
     // fetch only rejects when no response arrived at all (no connection, server unreachable).
@@ -36,23 +36,62 @@ export async function register(details) {
     throw new Error(NETWORK_ERROR);
   }
 
-  let body;
+  let data;
   try {
     // .json() reads the response body and parses it from JSON.
-    body = await response.json();
+    data = await response.json();
   } catch {
     // The body wasn't JSON. Our API always sends JSON, so this reply came from something else,
     // e.g. the dev proxy's own error page when the API isn't running.
     throw new Error(NETWORK_ERROR);
   }
 
-  // response.ok is true for 2xx statuses (here 201 Created).
+  // response.ok is true for 2xx statuses (e.g. 200 OK, 201 Created).
   if (!response.ok) {
     // The API explains errors as { error: '...' }. `?.` (optional chaining) gives undefined
-    // instead of crashing if body is null; `??` uses GENERIC_ERROR if there's no message.
-    throw new Error(body?.error ?? GENERIC_ERROR);
+    // instead of crashing if data is null; `??` uses GENERIC_ERROR if there's no message.
+    throw new Error(data?.error ?? GENERIC_ERROR);
   }
 
-  // Success: the new customer, e.g. { id, first_name, last_name, email }.
-  return body;
+  return data;
+}
+
+// Creates an account and (because the API logs you in on registering) starts a session.
+// `details` is { first_name, last_name, email, password }.
+// Resolves to the new customer, e.g. { id, first_name, last_name, email }.
+// `export` lets other files import it: import { register } from '../api/auth'.
+export function register(details) {
+  return postJson('/auth/register', details);
+}
+
+// Logs in with an email and password, which starts a session (the API sets the cookie).
+// `{ email, password }` destructures the argument, so only those two fields are ever sent.
+// Resolves to the customer. A wrong email or password throws "Incorrect email or password".
+export function login({ email, password }) {
+  return postJson('/auth/login', { email, password });
+}
+
+// "No providers switched on": what getProviders() gives when it can't find out.
+// Exported so the login page can start with this same object (see getProviders).
+export const NO_PROVIDERS = { google: false, facebook: false };
+
+// Asks the API which "Sign in with..." providers are switched on.
+// Resolves to { google: true/false, facebook: true/false }. It never throws: if anything goes
+// wrong it resolves to NO_PROVIDERS, so the page simply shows no provider links and the email
+// form still works.
+//
+// It returns the NO_PROVIDERS object itself (not a copy). The page starts with that same
+// object, and React skips re-drawing when state is set to the identical object.
+export async function getProviders() {
+  // One try around everything, because any step can fail: fetch missing or rejecting, a
+  // non-JSON body, or even fetch returning nothing (response would be undefined).
+  try {
+    const response = await fetch('/auth/providers');
+    if (!response.ok) return NO_PROVIDERS;
+    const data = await response.json();
+    // `=== true` turns anything unexpected (missing, "yes", 1) into false.
+    return { google: data.google === true, facebook: data.facebook === true };
+  } catch {
+    return NO_PROVIDERS;
+  }
 }

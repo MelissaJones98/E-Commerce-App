@@ -21,9 +21,12 @@ browsing products, and completing a purchase.
 - Deploy the application using Render
 
 ## Database
-The database has seven tables: `customers`, `addresses`, `categories`, `products`, `cart_items`,
-`orders`, and `order_items`. `cart_items` holds each customer's shopping cart (one row per
-product in it), and `order_items` links each order to the products it contains.
+The database has eight tables: `customers`, `federated_credentials`, `addresses`, `categories`,
+`products`, `cart_items`, `orders`, and `order_items`. `cart_items` holds each customer's
+shopping cart (one row per product in it), and `order_items` links each order to the products it
+contains. `federated_credentials` links a Google or Facebook account to a customer, so they can
+sign in with it. Customers who only sign in that way have no password (`password_hash` is
+`NULL`).
 
 The full design, including the Entity Relationship Diagram, column types, relationships, and the
 reasoning behind each design decision, is in [docs/database-design.md](docs/database-design.md).
@@ -36,7 +39,7 @@ e-commerce-app/
 │   ├── server.js           # Starts the server (entry point for npm start / npm run dev)
 │   ├── openapi.yaml        # OpenAPI spec: the API documentation Swagger UI displays
 │   ├── routes/
-│   │   ├── auth.js         # /auth routes (register, login, logout)
+│   │   ├── auth.js         # /auth routes (register, login, logout, Google and Facebook sign-in)
 │   │   ├── products.js     # /products routes (browse, create, update, retire)
 │   │   ├── account.js      # /account routes (view, update, delete your own account)
 │   │   ├── cart.js         # /cart routes (view, add to, change, remove from, empty your cart)
@@ -44,9 +47,10 @@ e-commerce-app/
 │   │   └── orders.js       # /orders routes (your order history and order details)
 │   ├── services/
 │   │   ├── payment-processor.js # FAKE payment processor (stands in for Stripe)
-│   │   └── orders.js       # Builds a full order (address and items); shared by checkout and /orders
+│   │   ├── orders.js       # Builds a full order (address and items); shared by checkout and /orders
+│   │   └── federated-login.js # Google/Facebook sign-in rules: find the linked customer, link by email, or create one
 │   ├── config/
-│   │   └── passport.js     # Passport.js setup: checks logins, remembers who's logged in
+│   │   └── passport.js     # Passport.js setup: email/password, Google and Facebook logins; remembers who's logged in
 │   ├── middleware/
 │   │   └── require-auth.js # Blocks routes from customers who aren't logged in (401)
 │   ├── utils/
@@ -59,11 +63,15 @@ e-commerce-app/
 │   │   ├── schema.sql      # Creates the database tables (for a new database)
 │   │   ├── migrations/     # Updates an existing database to match schema.sql
 │   │   │   ├── 001-add-categories.sql
-│   │   │   └── 002-add-cart-items.sql
+│   │   │   ├── 002-add-cart-items.sql
+│   │   │   └── 003-add-federated-credentials.sql
 │   │   └── reset-test-db.js # Rebuilds the test database from schema.sql
 │   ├── tests/
 │   │   ├── auth.register.test.js # Tests for POST /auth/register
 │   │   ├── auth.login.test.js    # Tests for POST /auth/login and /auth/logout
+│   │   ├── auth.providers.test.js    # Google/Facebook routes when they're switched off
+│   │   ├── auth.providers-on.test.js # Google/Facebook routes and verify functions, with fake keys
+│   │   ├── federated-login.test.js   # Tests for the Google/Facebook sign-in rules
 │   │   ├── products.test.js      # Tests for the /products routes
 │   │   ├── account.test.js       # Tests for the /account routes
 │   │   ├── cart.test.js          # Tests for the /cart routes
@@ -85,11 +93,13 @@ e-commerce-app/
 │   │   ├── App.css         # Styles for the header, nav, page area and forms
 │   │   ├── routes.js       # Route table: which page to show for each URL
 │   │   ├── api/
-│   │   │   └── auth.js     # Calls the API's /auth endpoints (register)
+│   │   │   └── auth.js     # Calls the API's /auth endpoints (register, login, which providers are on)
 │   │   ├── components/
 │   │   │   └── Layout.js   # Header, main nav and the area where each page appears
-│   │   ├── pages/          # One component per page (Register works; the rest are placeholders)
-│   │   │   └── RegisterPage.test.js # Tests for the registration form
+│   │   ├── pages/          # One component per page (Register and Log in work; the rest are placeholders)
+│   │   │   ├── RegisterPage.test.js # Tests for the registration form
+│   │   │   └── LoginPage.test.js    # Tests for the login form, provider links and sign-in errors
+│   │   ├── setupProxy.js   # Dev only: sends Google/Facebook sign-in page visits on to the API
 │   │   ├── routes.test.js  # Tests for every page URL and the navigation
 │   │   ├── App.test.js     # Tests that App shows the home page
 │   │   ├── test-utils.js   # Shared test helper: renders the app at any URL
@@ -122,7 +132,7 @@ Using **pgAdmin 4**:
 1. Right-click **Databases → Create → Database…**, name it `ecommerce`, and click **Save**.
 2. Select the `ecommerce` database, open **Tools → Query Tool**, and check the tab title starts with `ecommerce/`.
 3. Open `back-end/db/schema.sql`, then click **Execute** (or press F5).
-4. Refresh the database: `addresses`, `cart_items`, `categories`, `customers`, `order_items`, `orders`, and `products` appear under **Schemas → public → Tables**.
+4. Refresh the database: `addresses`, `cart_items`, `categories`, `customers`, `federated_credentials`, `order_items`, `orders`, and `products` appear under **Schemas → public → Tables**.
 
 Or using **psql** from the project root:
 ```bash
@@ -140,9 +150,11 @@ above (pgAdmin Query Tool → open file → Execute):
 |---|---|
 | `001-add-categories.sql` | Adds the `categories` table and `products.category_id` |
 | `002-add-cart-items.sql` | Adds the `cart_items` table (shopping carts) |
+| `003-add-federated-credentials.sql` | Adds the `federated_credentials` table (Google and Facebook sign-in) and lets `customers.password_hash` be empty |
 
 To check which migrations a database already has, refresh it in pgAdmin and look under
-**Schemas → public → Tables**: `categories` means 001 has run, and `cart_items` means 002 has run.
+**Schemas → public → Tables**: `categories` means 001 has run, `cart_items` means 002 has run,
+and `federated_credentials` means 003 has run.
 
 Each migration runs once. Running one again fails with an error (e.g. "relation already exists")
 and changes nothing, because each runs inside a transaction.
@@ -159,13 +171,23 @@ PGUSER=postgres
 PGPASSWORD=your-postgres-password
 
 SESSION_SECRET=a-long-random-string
+
+# Optional: "Sign in with Google" and "Sign in with Facebook".
+# Leave these out (or empty) and those buttons are simply hidden.
+# See "Set up Google and Facebook sign-in" below for where to get them.
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+FACEBOOK_APP_ID=
+FACEBOOK_APP_SECRET=
+# Where Google and Facebook send the browser back to. The default is the React app:
+# OAUTH_CALLBACK_BASE_URL=http://localhost:3001
 ```
 `SESSION_SECRET` signs the login session cookie so it can't be forged. The server won't start
 without it. Generate a random value from the `back-end` folder with:
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
-`.env` is listed in `.gitignore`, so your password and secret are never committed.
+`.env` is listed in `.gitignore`, so your password and secrets are never committed.
 
 ### 4. Start the server
 All `npm` commands must be run from the `back-end` folder, where `package.json` is:
@@ -182,6 +204,8 @@ npm start      # runs without auto-restart
 | `POST /auth/register` | Creates a customer account (see below) |
 | `POST /auth/login` | Logs in with email and password (see below) |
 | `POST /auth/logout` | Logs out (must be logged in) |
+| `GET /auth/providers` | Which of Google and Facebook sign-in are switched on |
+| `GET /auth/google`, `GET /auth/facebook` | Sign in with Google or Facebook (visited by the browser; see below) |
 | `GET /products` | Lists products; add `?category=1` to filter by category |
 | `GET /products/:productId` | Gets one product |
 | `POST /products` | Creates a product (must be logged in) |
@@ -235,10 +259,45 @@ Send a **POST** request to `http://localhost:3000/auth/login` with **Body → ra
 |---|---|
 | `200 OK` | Logged in. Returns the customer and sets a session cookie |
 | `400 Bad Request` | `email` or `password` is missing |
-| `401 Unauthorized` | The email or password is wrong (the same message for both) |
+| `401 Unauthorized` | The email or password is wrong (the same message for both). Accounts with no password, made by signing in with Google or Facebook, also get this |
 
 Postman stores the session cookie automatically and sends it with your following requests, just
 like a browser, so you stay logged in.
+
+The password check uses bcrypt (`bcryptjs`): it hashes the password you send with the salt
+stored inside the saved hash, and compares the results. Passwords are never stored or compared
+as plain text.
+
+#### Sign in with Google or Facebook
+These routes are visited by the **browser** (the customer clicks "Sign in with Google" on the
+Log in page), not called from Postman or code. Each one only works once its keys are set; see
+[Set up Google and Facebook sign-in](#set-up-google-and-facebook-sign-in-optional).
+
+1. `GET /auth/google` (or `/auth/facebook`) sends the browser to Google's sign-in page.
+2. The customer signs in at Google and agrees to share their name and email.
+3. Google sends the browser back to `/auth/google/callback`. Passport checks the response with
+   Google, and the customer is logged in (the session cookie is set) as:
+   - the customer already linked to this Google account, if there is one;
+   - otherwise, the customer with the same email, if Google has verified that email (the
+     accounts are linked from now on);
+   - otherwise, a brand-new customer with no password.
+4. The browser goes to the shop's home page.
+
+Two safety details:
+- **Verified emails only.** An account is only joined by email if the provider confirms the
+  person owns that email; otherwise someone could claim another person's address and get into
+  their account. Google says so with a "verified" flag. Facebook sends no flag, but it only
+  shares email addresses its users have confirmed, so its emails are trusted.
+- **`state`.** Before sending the browser to Google or Facebook, Passport stores a random value
+  in the session and includes it in the request; the provider must send the same value back.
+  That stops another website from pushing a forged sign-in response onto the customer.
+
+If sign-in doesn't work, the browser goes back to the Log in page with a message instead (see
+"Google and Facebook sign-in problems" under Error Handling).
+
+`GET /auth/providers` returns e.g. `{ "google": true, "facebook": false }`, so the Log in page
+knows which buttons to show. When a provider isn't set up, its routes reply
+`404 { "error": "Google sign-in is not set up" }`.
 
 #### Log out
 Send a **POST** request to `http://localhost:3000/auth/logout` with no body.
@@ -524,7 +583,8 @@ These are real requests. On `npm run dev` they change your real `ecommerce` data
 - the spec is **valid OpenAPI**, using the validator library `@apidevtools/swagger-parser`;
 - every documented endpoint **really exists** in the app, so the docs can never describe a
   route that isn't there;
-- every endpoint has a summary, a section, and a documented success response.
+- every endpoint has a summary, a section, and a documented success response (or, for the
+  Google and Facebook sign-in routes, a redirect).
 
 The tests can't spot an endpoint that exists but **isn't** documented, so remember to document
 new routes.
@@ -532,8 +592,8 @@ new routes.
 ### Front end (React)
 The front end is a React app in the `front-end` folder, made with Create React App. It uses
 [React Router](https://reactrouter.com/) (v7) to move between pages without reloading the site.
-The Register page is connected to the API; the other pages are still placeholders that later
-tickets will connect.
+The Register and Log in pages are connected to the API; the other pages are still placeholders
+that later tickets will connect.
 
 Start the API first (`npm run dev` in the `back-end` folder), then start the front end from the
 `front-end` folder:
@@ -550,6 +610,12 @@ cookie works with no extra setup. Page addresses typed into the browser ask for 
 are always answered by React, never passed to the API. That's why `/account` can be both a page
 and an API endpoint.
 
+The one exception is Google and Facebook sign-in. The "Sign in with..." buttons are ordinary
+links, so clicking one asks for a page, which the `"proxy"` setting would answer with React.
+`front-end/src/setupProxy.js` (which Create React App runs automatically, in development only)
+always passes `/auth/google…` and `/auth/facebook…` on to the API, so the API can redirect the
+browser to Google or Facebook and back.
+
 `.env.development` also sets `DANGEROUSLY_DISABLE_HOST_CHECK=true`. Without it, Create React
 App crashes on start (`options.allowedHosts[0] should be a non-empty string`) on computers
 whose network address isn't a typical home or office one (e.g. on a VPN such as Tailscale).
@@ -565,7 +631,7 @@ line to keep the check on.
 | `/` | Products (the home page) |
 | `/products/:productId` | A single product |
 | `/register` | Register: create an account (signs you in, then goes to Products) |
-| `/login` | Log in |
+| `/login` | Log in: with email and password, or "Sign in with Google / Facebook" (when set up); links to Register |
 | `/account` | Your account |
 | `/cart` | Your cart (links to checkout) |
 | `/checkout` | Checkout |
@@ -578,6 +644,81 @@ The nav bar at the top links to the main pages and highlights the one you're on.
 **Why React Router v7, not the newest v8?** v8 is only published as ES modules, which the
 test runner built into Create React App (Jest 27) can't load. v7 works the same way for
 everything used here, so upgrading later is a small change.
+
+### Set up Google and Facebook sign-in (optional)
+Everything else works without this: the "Sign in with..." buttons only appear once a provider's
+keys are in `back-end/.env`. Both providers are free to set up. This setup is for running the
+app on your own computer. Your apps stay in "testing" or "development" mode, so only you (and
+people you add as testers) can sign in with them.
+
+The address Google and Facebook send the browser back to is on the **React app (port 3001)**,
+not the API. `setupProxy.js` passes it on to the API, so the session cookie ends up on the same
+address as the shop.
+
+#### Google
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/) and sign in with your
+   Google account.
+2. Create a project: click the project picker at the top → **New Project**, name it (e.g.
+   `e-commerce-app`) → **Create**, then make sure it's selected.
+3. Set up the consent screen (the page that asks "Allow e-commerce-app to see your email?"):
+   go to **APIs & Services → OAuth consent screen** (Google may call it **Google Auth
+   Platform**) → **Get started**.
+   - App name: anything, e.g. `E-Commerce App`. User support email: your email.
+   - Audience: **External**.
+   - Contact email: your email. Agree to the policy, then **Create**.
+   - Under **Audience → Test users**, add your own Gmail address. While the app is in
+     "Testing", only test users can sign in.
+4. Create the keys: go to **Clients** (or **APIs & Services → Credentials → Create Credentials →
+   OAuth client ID**).
+   - Application type: **Web application**. Name: anything.
+   - **Authorised redirect URIs → Add URI**:
+     `http://localhost:3001/auth/google/callback` (exactly this, with no slash at the end).
+   - **Create**. Copy the **Client ID** and **Client secret**.
+5. Put them in `back-end/.env`:
+   ```
+   GOOGLE_CLIENT_ID=the-client-id
+   GOOGLE_CLIENT_SECRET=the-client-secret
+   ```
+
+#### Facebook
+1. Go to [Meta for Developers](https://developers.facebook.com/), log in with Facebook, and
+   register as a developer if asked. Meta may ask you to verify your account, e.g. with a phone
+   number.
+2. **My Apps → Create App**. Name it (e.g. `E-Commerce App`), and choose the use case
+   **Authenticate and request data from users with Facebook Login**. Skip connecting a business
+   if asked.
+3. In the app's dashboard, open the Facebook Login use case → **Customize** (or **Permissions**)
+   and make sure the **email** permission is added.
+4. Open Facebook Login's **Settings** and, under **Valid OAuth Redirect URIs**, add
+   `http://localhost:3001/auth/facebook/callback`. Save. (Facebook allows `http://localhost`
+   addresses while the app is in development mode.)
+5. Go to **App settings → Basic** and copy the **App ID** and **App secret** (click **Show**).
+6. Put them in `back-end/.env`:
+   ```
+   FACEBOOK_APP_ID=the-app-id
+   FACEBOOK_APP_SECRET=the-app-secret
+   ```
+Leave the app in **development mode**. Only you, and people you add under **App roles**, can
+sign in with it. Going "Live" for the public needs Meta's app review, which this project doesn't
+need.
+
+#### Try it
+Restart the API (`npm run dev` in `back-end`), then open http://localhost:3001/login. The
+"Sign in with Google" and "Sign in with Facebook" buttons now appear. `GET /auth/providers`
+shows which providers the API has picked up.
+
+#### Known limitations
+- **Account pre-hijacking.** Signing in with Google or Facebook joins you to the existing
+  account with the same email. But registering with an email and password doesn't check that
+  you own that email. So someone could register `ada@gmail.com` with their own password
+  *before* Ada does. When the real Ada later signs in with Google, she's linked to that account,
+  and the other person can still log in with their password. The fix is to confirm emails at
+  registration (send a code or link to the address), which needs the email system listed under
+  Future Work.
+- **No password for Google/Facebook-only accounts.** Customers who only ever sign in with Google
+  or Facebook have no password, and there's no way to add one yet (or to unlink a provider).
+- **Local only.** The callback addresses are `localhost`. Deploying needs new redirect URIs
+  (and `OAUTH_CALLBACK_BASE_URL`) for the live address.
 
 ### 6. Run the tests
 The back end has two kinds of automated test. Both are run from the `back-end` folder:
@@ -603,7 +744,10 @@ reruns the tests whenever you save a file.
 #### Unit and integration tests
 These tests use a separate `ecommerce_test` database, so they never touch your real data.
 `.env.test` switches the database name and provides a test-only `SESSION_SECRET`; all other
-connection details come from your `.env`.
+connection details come from your `.env`. It also sets the Google and Facebook keys to empty
+values, so the tests always run with both providers switched off, even after you've put real
+keys in `.env`. (The tests that need a provider switched on set fake keys themselves, so they
+never contact Google or Facebook.)
 
 Create the test database once, from the `back-end` folder:
 ```bash
@@ -668,7 +812,7 @@ installed in the project's `node_modules`.
 
 | Folder | Requests | Checks |
 |---|---|---|
-| 1. Register and log in | Register a new test customer, then log in | `201`, then `200` and a session cookie |
+| 1. Register and log in | Register a new test customer; view the account straight away; log in; ask which sign-in providers are on | `201` and a session cookie; `200` (registering logged us in); `200` and a session cookie; `200` with `google` and `facebook` as true/false |
 | 2. Account | View, update, view again, an invalid update, a logged-out view | `200`, `200`, the update was saved, `400`, `401` |
 | 3. Cart | Create a test product (8.50, 5 in stock); view the empty cart; add 2; add 1 more; try to add 3 more; change the quantity to 1; remove it; remove it again; add it back; empty the cart; view it; view it logged out; retire the product | `201`; empty cart; total `17.00`; quantities added together to 3, total `25.50`; `409` (6 > 5 in stock); total `8.50`; `204`; `404`; `201`; `204`; empty cart; `401`; `204` |
 | 4. Delete account (clean-up) | Delete the account, then try to use it again | `204`, then `401` and `401` |
@@ -686,9 +830,9 @@ of the **failed** column:
 ┌─────────────────────────┬───────────────────┬──────────────────┐
 │                         │          executed │           failed │
 ├─────────────────────────┼───────────────────┼──────────────────┤
-│                requests │                43 │                0 │
-│            test-scripts │                86 │                0 │
-│              assertions │               119 │                0 │
+│                requests │                44 │                0 │
+│            test-scripts │                88 │                0 │
+│              assertions │               122 │                0 │
 └─────────────────────────┴───────────────────┴──────────────────┘
 ```
 Newman exits with code `0` when everything passes and `1` when anything fails, so it can be
@@ -739,6 +883,10 @@ journey order.
 - React
 - React Router: moving between pages in the React app
 - bcryptjs: password hashing (pure-JavaScript bcrypt)
+- Passport.js: logging in, with `passport-local` (email and password),
+  `passport-google-oauth20` (Sign in with Google) and `passport-facebook` (Sign in with Facebook)
+- http-proxy-middleware: sends the Google and Facebook sign-in visits from the React dev server
+  to the API
 - Node.js test runner (`node:test`) and Supertest: unit and integration tests
 - Jest and React Testing Library: front-end tests
 - Postman and Newman: end-to-end API tests
@@ -764,6 +912,8 @@ Implemented error handling for:
 - Payment processor failures (`502`)
 - Orders not found, or belonging to another customer (`404`)
 - Failed logins (`400` / `401`)
+- Google and Facebook sign-in problems (redirect back to the Log in page with a message), or a
+  provider that isn't set up (`404`)
 - Not logged in (`401`)
 - Malformed or missing request bodies (`400`)
 - Unexpected server errors (`500`)
@@ -905,7 +1055,24 @@ with products.
 ### Failed logins: `400 Bad Request` / `401 Unauthorized`
 `POST /auth/login` returns `400` if `email` or `password` is missing, and `401` if they don't
 match an account. A wrong password and an unknown email return exactly the same `401` message.
-Different messages would let anyone check whether an email address has an account.
+Different messages would let anyone check whether an email address has an account. An account
+with no password (made by signing in with Google or Facebook) gets the same `401`, never a crash.
+
+### Google and Facebook sign-in problems
+The sign-in routes are visited by the browser, so instead of a JSON error they send the browser
+back to the Log in page as `/login?error=<code>&provider=<google|facebook>`, which shows a
+message:
+
+| Code | When | Message |
+|---|---|---|
+| `cancelled` | The customer clicked "Cancel" at Google or Facebook | "Sign-in was cancelled." |
+| `no_email` | They didn't let Facebook share their email | "Facebook didn't share your email address, so we couldn't sign you in. Please allow email access or use another way to log in." |
+| `email_unverified` | Google hasn't confirmed they own the email | "Your Google email address isn't verified, so we couldn't sign you in." |
+| `failed` | Anything else (e.g. a forged or expired response); the details are logged on the server | "Something went wrong signing you in. Please try again." |
+
+The page only ever shows these fixed messages, never the code itself, so typing a made-up
+`?error=` into the address bar can't put your own text on the page. A provider that isn't set
+up returns `404 { "error": "Google sign-in is not set up" }` from its routes.
 
 ### Not logged in: `401 Unauthorized`
 Routes that need a logged-in customer use the `requireAuth` middleware, which returns `401`
@@ -928,13 +1095,20 @@ errors can reveal how the app works internally.
 
 ### Testing
 The API is built using test-driven development (TDD): each test is written first and run to
-confirm it fails, then just enough code is added to make it pass. There are 264 tests:
+confirm it fails, then just enough code is added to make it pass. There are 287 tests:
 - **Registration (31):** successful registration, being logged in straight away (and not after
   a failed registration), duplicate accounts (including simultaneous requests), and each type of
   invalid input above
-- **Login and logout (17):** successful login, staying logged in across requests, the `HttpOnly`
-  session cookie, identical errors for a wrong password and an unknown email, missing details,
-  and logging out
+- **Login and logout (18):** successful login, staying logged in across requests, the `HttpOnly`
+  session cookie, identical errors for a wrong password and an unknown email, accounts with no
+  password, missing details, and logging out
+- **Google and Facebook sign-in (22):** the sign-in rules (a new customer with no password,
+  linking to an existing customer by verified email, emails in any letter case, signing in
+  twice without duplicates, still finding a customer who changed their email, linking both
+  providers, and refusing a missing or unverified email without changing anything); the
+  redirects to Google and Facebook with the right client id, callback address, scopes and
+  `state` value; cancelling; going back to the Log in page (not an error page) even if the
+  login itself fails; and the providers being hidden (`404`) when their keys aren't set
 - **Products (62):** listing and filtering by category, getting a single product, retired products
   staying hidden, creating, updating and retiring products, login being required to make changes,
   duplicate SKUs, unknown categories, and each type of invalid product detail or id above
@@ -956,12 +1130,13 @@ confirm it fails, then just enough code is added to make it pass. There are 264 
   invisible and giving the same `404` as an order that doesn't exist, and invalid ids
 - **API documentation (6):** Swagger UI and the raw spec being served, the spec being valid
   OpenAPI, every documented endpoint existing in the app, and every endpoint having a summary,
-  a section and a documented success response
+  a section and a documented success (or redirect) response
 
 Every test runs against a real PostgreSQL test database, not mocks.
 
-On top of these, an **end-to-end test collection** run by Newman (43 requests, 119 checks) takes
-customers through registering (and being logged in straight away), logging in, viewing and updating their account, filling,
+On top of these, an **end-to-end test collection** run by Newman (44 requests, 122 checks) takes
+customers through registering (and being logged in straight away), logging in, checking which
+sign-in providers are on, viewing and updating their account, filling,
 changing and emptying their cart, deleting their account, checking out (including a
 mistyped card and a declined payment), and viewing their order history, then checks the API
 documentation is served, using the real running server and the test
@@ -969,11 +1144,14 @@ database. It also checks that no response ever contains
 a password. It has been confirmed to fail (exit code `1`) when the server isn't running, so a
 broken server can't produce a passing run.
 
-The **front end** has 41 tests (Jest and React Testing Library). The registration form's 12
+The **front end** has 55 tests (Jest and React Testing Library). The registration form's 12
 tests check its fields, the link to log in, the exact request sent (never the confirm
 password), mismatched passwords, API and network errors (including the dev proxy's own error
 page), the button while sending, double-clicks, and retrying after a password mismatch or an
-API error. The API is
+API error. The login page's 14 tests check its fields, the link to Register, the exact request
+sent, wrong details and network errors, the button while sending, a "Sign in with..." link for
+each provider that's switched on (and none if that can't be checked), and the message for each
+sign-in error code, including that a made-up code is never shown. The API is
 replaced by a fake `fetch`, so no server is needed. The other 29 check every page URL showing the
 right page (one `<h1>` each), product and order ids read from the URL, unknown URLs (including
 extra segments after a real page) showing "Page not found" with the nav still there, every nav

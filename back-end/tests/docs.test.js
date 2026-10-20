@@ -113,7 +113,7 @@ describe('API documentation', () => {
     }
   });
 
-  test('every documented endpoint has a summary, a tag and a success response', () => {
+  test('every documented endpoint has a summary, a tag and a success or redirect response', () => {
     const operations = documentedOperations();
     // With nothing documented, the loop below would check nothing and pass.
     assert.ok(operations.length > 0, 'no endpoints are documented');
@@ -124,10 +124,14 @@ describe('API documentation', () => {
       assert.equal(typeof operation.summary, 'string', `${name} needs a summary`);
       // Tags group endpoints into sections in Swagger UI, e.g. "Cart".
       assert.ok(operation.tags?.length > 0, `${name} needs a tag`);
-      // At least one documented response code starting with 2 (200, 201, 204).
+      // At least one documented response code starting with 2 (200, 201, 204),
+      // or with 3 (302) for the Google and Facebook sign-in routes, which
+      // succeed by redirecting the browser.
       // Object.keys() gives the response codes, e.g. ['200', '401'].
-      const successCodes = Object.keys(operation.responses ?? {}).filter((code) => code.startsWith('2'));
-      assert.ok(successCodes.length > 0, `${name} needs a documented success response`);
+      const successCodes = Object.keys(operation.responses ?? {}).filter(
+        (code) => code.startsWith('2') || code.startsWith('3')
+      );
+      assert.ok(successCodes.length > 0, `${name} needs a documented success or redirect response`);
     }
   });
 });

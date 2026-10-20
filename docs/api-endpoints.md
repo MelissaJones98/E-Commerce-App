@@ -75,8 +75,11 @@ database tables:
 | `POST` | `/auth/register` | Public | Create a customer account | `201` |
 | `POST` | `/auth/login` | Public | Log in with email and password | `200` |
 | `POST` | `/auth/logout` | Customer | Log out | `204` |
+| `GET` | `/auth/providers` | Public | Which of Google and Facebook sign-in are switched on | `200` |
 | `GET` | `/auth/google` | Public | Start "Sign in with Google" | redirect |
 | `GET` | `/auth/google/callback` | Public | Google redirects back here after sign-in | redirect |
+| `GET` | `/auth/facebook` | Public | Start "Sign in with Facebook" | redirect |
+| `GET` | `/auth/facebook/callback` | Public | Facebook redirects back here after sign-in | redirect |
 
 `POST /auth/register` request:
 ```json
@@ -99,6 +102,18 @@ Errors: `400` missing fields or password too short, `409` email already register
 `POST /auth/login` request: `{ "email": "...", "password": "..." }`.
 Response `200` is the customer (as above). Errors: `401` wrong email or password.
 Use the same message for both, so the response doesn't reveal which emails are registered.
+Accounts with no password (made by signing in with Google or Facebook) also get that `401`.
+
+`GET /auth/providers` response `200`: `{ "google": true, "facebook": false }`. A provider is on
+when its keys are set in `back-end/.env`; when it's off, its four routes reply
+`404 { "error": "Google sign-in is not set up" }` (or Facebook).
+
+The Google and Facebook routes are visited by the **browser**, not called with `fetch`. The
+callback logs the customer in and redirects to `/`. That customer is the one already linked to
+this Google or Facebook account, or else the one with the same verified email, or else a new
+customer with no password. If sign-in doesn't work, it redirects to
+`/login?error=<code>&provider=<google|facebook>`, where `code` is `cancelled`, `no_email`,
+`email_unverified` or `failed`.
 
 ### Products
 

@@ -88,3 +88,48 @@
 .form-error {
   color: #b00020;
 }
+
+/* The "or" between the login form and the "Sign in with..." buttons: centred and grey.
+   max-width matches .form, so it's centred under the form rather than the whole page. */
+.divider {
+  max-width: 24rem;
+  margin: 1rem 0 0.5rem;
+  text-align: center;
+  color: #666;
+}
+
+/* "Sign in with Google" and "Sign in with Facebook". They're links (they leave the React app
+   for Google or Facebook), styled to look like buttons.
+   display: block puts each on its own line; box-sizing: border-box makes the width include
+   the padding and border, so both buttons come out exactly as wide as the form. */
+.provider-button {
+  display: block;
+  box-sizing: border-box;
+  max-width: 24rem;
+  margin-bottom: 0.5rem;
+  padding: 0.5rem;
+  border-radius: 4px;
+  text-align: center;
+  text-decoration: none;
+  font-weight: bold;
+}
+
+/* Each provider's own colours. ".provider-button.google" means an element with BOTH classes. */
+.provider-button.google {
+  background: #fff;
+  color: #222;
+  border: 1px solid #ccc;
+}
+
+.provider-button.facebook {
+  background: #1877f2; /* Facebook's brand blue */
+  color: #fff;
+  border: 1px solid #1877f2;
+}
+
+/* A clear outline when the button is reached with the keyboard (Tab), so keyboard users can
+   see where they are. :focus-visible only applies to keyboard focus, not mouse clicks. */
+.provider-button:focus-visible {
+  outline: 3px solid #1a4fa0;
+  outline-offset: 2px;
+}

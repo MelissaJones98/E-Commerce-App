@@ -1,6 +1,8 @@
 // Configures Passport.js, the library that handles logging in. It answers
-// three questions:
+// these questions:
 //   1. How do we check a login attempt?            (the LocalStrategy below)
+//   1b. How do we sign someone in with Google or Facebook? (the Google and
+//       Facebook strategies below)
 //   2. What do we store in the session after login? (serializeUser)
 //   3. How do we get the customer back from the session on later requests?
 //      (deserializeUser)
@@ -13,6 +15,12 @@ import passport from 'passport';
 // `{ Strategy as LocalStrategy }` imports the export named Strategy and calls
 // it LocalStrategy in this file, which reads more clearly.
 import { Strategy as LocalStrategy } from 'passport-local';
+// The "Sign in with Google" and "Sign in with Facebook" strategies. Both use
+// OAuth 2.0, the standard way to let another service confirm who someone is.
+import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
+import { Strategy as FacebookStrategy } from 'passport-facebook';
+// The rules for turning a Google or Facebook person into one of our customers.
+import { findOrCreateCustomer, FederatedLoginError } from '../services/federated-login.js';
 // bcryptjs (pure-JavaScript bcrypt): used here to check a password against its
 // stored hash. Imported under the name `bcrypt`.
 import bcrypt from 'bcryptjs';
@@ -53,6 +61,12 @@ passport.use(
       // emails are registered.
       if (!customer) return done(null, false);
 
+      // No password (NULL): this customer only signs in with Google or
+      // Facebook. Fail exactly like a wrong password. This check must come
+      // before bcrypt.compare(), which throws an error (a 500) when the hash
+      // isn't a string.
+      if (customer.password_hash === null) return done(null, false);
+
       // bcrypt.compare() hashes the password that was sent, using the same salt
       // stored inside the saved hash, and checks whether the results match.
       // It returns true or false. (A hash can't be "decrypted" back into the password.)
@@ -70,6 +84,130 @@ passport.use(
     }
   })
 );
+
+// ---------------------------------------------------------------------------
+// 1b. Signing in with Google or Facebook
+// ---------------------------------------------------------------------------
+// How it works (the OAuth "redirect dance"):
+//   1. The customer clicks "Sign in with Google". GET /auth/google sends their
+//      browser to Google, with our client id and the address to come back to.
+//   2. They log in at Google and agree to share their name and email.
+//   3. Google sends the browser back to GET /auth/google/callback with a
+//      one-time code. Passport swaps that code (plus our secret) for the
+//      person's profile, directly with Google.
+//   4. Passport calls our "verify" function below with that profile, and we
+//      find or create the matching customer.
+//
+// Each provider is switched on only if both its keys are set in back-end/.env.
+// An empty value counts as "not set": .env.test uses empty values so the
+// tests never pick up real keys.
+
+// True if every value given is a non-empty string.
+// `...values` ("rest parameter") collects all the arguments into an array.
+const allSet = (...values) => values.every((value) => typeof value === 'string' && value !== '');
+
+// Which providers are switched on. routes/auth.js uses this for
+// GET /auth/providers and to reply 404 when a provider is off.
+export const enabledProviders = {
+  google: allSet(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET),
+  facebook: allSet(process.env.FACEBOOK_APP_ID, process.env.FACEBOOK_APP_SECRET),
+};
+
+// The start of the address Google and Facebook send the browser back to. In
+// development that's the React app on port 3001, whose proxy passes the
+// request on to this API (see front-end/src/setupProxy.js). `||` uses the
+// default when the variable is unset or empty.
+const callbackBase = process.env.OAUTH_CALLBACK_BASE_URL || 'http://localhost:3001';
+
+// Shared by both verify functions: runs the sign-in rules and reports the
+// outcome to Passport through `done`:
+//   done(null, customer)              signed in
+//   done(null, false, { code })       refused on purpose (no email, or not
+//                                     verified); the route shows a message
+//   done(err)                         something unexpected went wrong
+const signIn = async (details, done) => {
+  try {
+    done(null, await findOrCreateCustomer(details));
+  } catch (err) {
+    // `instanceof` checks which kind of error it is.
+    if (err instanceof FederatedLoginError) return done(null, false, { code: err.code });
+    done(err);
+  }
+};
+
+// Called by Passport after Google confirms who the person is. accessToken and
+// refreshToken would let us call Google's APIs for them; we don't need to.
+// `profile` is what Google told us about them. `?.` stops safely (giving
+// undefined) if a part is missing, e.g. no emails at all.
+export function verifyGoogle(accessToken, refreshToken, profile, done) {
+  return signIn(
+    {
+      provider: 'google',
+      subject: profile.id,
+      email: profile.emails?.[0]?.value,
+      // Google tells us whether it has confirmed the person owns the email.
+      emailVerified: profile.emails?.[0]?.verified === true,
+      firstName: profile.name?.givenName,
+      lastName: profile.name?.familyName,
+    },
+    done
+  );
+}
+
+// The same for Facebook. Facebook doesn't send a "verified" flag, but it only
+// shares an email address its user has confirmed, so any email it sends is
+// treated as verified.
+export function verifyFacebook(accessToken, refreshToken, profile, done) {
+  const email = profile.emails?.[0]?.value;
+  return signIn(
+    {
+      provider: 'facebook',
+      subject: profile.id,
+      email,
+      emailVerified: Boolean(email),
+      firstName: profile.name?.givenName,
+      lastName: profile.name?.familyName,
+    },
+    done
+  );
+}
+
+// Register each strategy only if its keys are set, so the app still starts
+// (with that provider off) for anyone without keys.
+if (enabledProviders.google) {
+  passport.use(
+    new GoogleStrategy(
+      {
+        clientID: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        // Must match an "Authorised redirect URI" in the Google Cloud Console exactly.
+        callbackURL: `${callbackBase}/auth/google/callback`,
+        // state: Passport sends Google a random value, keeps a copy in the
+        // session, and checks Google sends the same value back. That stops
+        // another website pushing a forged sign-in response onto the customer.
+        state: true,
+      },
+      verifyGoogle
+    )
+  );
+}
+
+if (enabledProviders.facebook) {
+  passport.use(
+    new FacebookStrategy(
+      {
+        clientID: process.env.FACEBOOK_APP_ID,
+        clientSecret: process.env.FACEBOOK_APP_SECRET,
+        // Must match a "Valid OAuth Redirect URI" in the Meta app settings exactly.
+        callbackURL: `${callbackBase}/auth/facebook/callback`,
+        // Ask Facebook for these profile fields (it sends only the id by default).
+        profileFields: ['id', 'emails', 'name'],
+        state: true,
+      },
+      verifyFacebook
+    )
+  );
+}
 
 // ---------------------------------------------------------------------------
 // 2. What to store in the session after login
