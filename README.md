@@ -96,8 +96,12 @@ e-commerce-app/
 │   │   ├── App.js          # Builds the browser router from the route table
 │   │   ├── App.css         # Styles for the header, nav, page area and forms
 │   │   ├── routes.js       # Route table: which page to show for each URL
+│   │   ├── format.js       # formatPrice(): "8.50" → "£8.50" (tested in format.test.js)
 │   │   ├── api/
-│   │   │   └── auth.js     # Calls the API's /auth endpoints (register, login, logout, who's logged in, providers)
+│   │   │   ├── request.js  # requestJson(): sends a request; errors carry the HTTP status
+│   │   │   ├── auth.js     # Calls the API's /auth endpoints (register, login, logout, who's logged in, providers)
+│   │   │   ├── products.js # Calls GET /products and GET /products/:id
+│   │   │   └── products.test.js # Tests for the products API calls and their errors
 │   │   ├── auth/
 │   │   │   ├── AuthContext.js  # Who's logged in, shared with every page (useAuth())
 │   │   │   ├── RequireAuth.js  # Guard: pages that need you logged in (else go to Log in)
@@ -105,14 +109,17 @@ e-commerce-app/
 │   │   │   ├── AuthContext.test.js # Tests for the login record and logging out
 │   │   │   └── access.test.js  # Tests for the nav, the guards, and logging in/out in the app
 │   │   ├── components/
-│   │   │   └── Layout.js   # Header, main nav (changes when you log in) and the page area
-│   │   ├── pages/          # One component per page (Register and Log in work; the rest are placeholders)
+│   │   │   ├── Layout.js   # Header, main nav (changes when you log in) and the page area
+│   │   │   ├── ProductList.js # The grid of product cards
+│   │   │   └── ProductCard.js # One product: name, 2-line description, price; links to its page
+│   │   ├── pages/          # One component per page (Products, Register and Log in work; the rest are placeholders)
+│   │   │   ├── ProductsPage.test.js # Tests for the Products grid
 │   │   │   ├── RegisterPage.test.js # Tests for the registration form
 │   │   │   └── LoginPage.test.js    # Tests for the login form, provider links and sign-in errors
 │   │   ├── setupProxy.js   # Dev only: sends Google/Facebook sign-in page visits on to the API
 │   │   ├── routes.test.js  # Tests for every page URL and the navigation
 │   │   ├── App.test.js     # Tests that App shows the home page
-│   │   ├── test-utils.js   # Shared test helper: renders the app at any URL, logged in or out
+│   │   ├── test-utils.js   # Shared test helper: renders the app at any URL, logged in or out, with fake products and cart
 │   │   └── setupTests.js   # Test setup: jest-dom matchers and a TextEncoder polyfill
 │   ├── .env.development    # Dev server settings: runs React on port 3001
 │   └── package.json        # Also holds "proxy": passes API requests on to port 3000
@@ -262,8 +269,13 @@ Stripe payments are added, only that one file should need replacing.
 ### Front end (React)
 The front end is a React app in the `front-end` folder, made with Create React App. It uses
 [React Router](https://reactrouter.com/) (v7) to move between pages without reloading the site.
-The Register and Log in pages are connected to the API; the other pages are still placeholders
-that later tickets will connect.
+The Products, Register and Log in pages are connected to the API; the other pages are still
+placeholders that later tickets will connect.
+
+**Products (the home page)** shows every product in the shop as a grid of cards. Each card shows
+the name, the description cut to two lines, and the price (in pounds, e.g. "£8.50"). Sold-out
+products are labelled "Out of stock". The whole card links to the product's own page. Anyone
+can browse; no login is needed. There are no product images yet (see Future Work).
 
 Start the API first (`npm run dev` in the `back-end` folder), then start the front end from the
 `front-end` folder:
@@ -294,7 +306,7 @@ you can delete this line to keep the check on.
 
 | URL | Page |
 |---|---|
-| `/` | Products (the home page) |
+| `/` | Products (the home page): a grid of every product |
 | `/products/:productId` | A single product |
 | `/register` | Register: create an account (signs you in, then goes to Products) |
 | `/login` | Log in: with email and password, or "Sign in with Google / Facebook" (when set up); links to Register |
@@ -525,9 +537,11 @@ account, checking out (including a mistyped card and a declined payment) and vie
 orders, against the real running server. After every request it also checks that no response
 contains a password.
 
-The **front end** has 86 tests: the registration form (12), the login page and its sign-in
-errors (14), the login record (8), access control (23: the nav, the guards, returning to the page
-you wanted, logging out) and routing (29: every URL, the nav links, "Page not found").
+The **front end** has 102 tests: the Products page (8: the grid, links, "Out of stock", empty
+and error states), the products API and price formatting (8), the registration form (12), the
+login page and its sign-in errors (14), the login record (8), access control (23: the nav, the
+guards, returning to the page you wanted, logging out) and routing (29: every URL, the nav links,
+"Page not found").
 
 ## Future Work
 - Show an image for each product

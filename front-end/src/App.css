@@ -155,3 +155,83 @@
   outline: 3px solid #1a4fa0;
   outline-offset: 2px;
 }
+
+/* ----- The Products grid ----- */
+
+/* The list of cards, laid out as a grid.
+   display: grid arranges children in rows and columns. grid-template-columns describes the
+   columns: repeat(auto-fill, minmax(220px, 1fr)) means "as many columns as fit, each at least
+   220px wide, sharing any leftover space equally" (1fr = one share of the free space). So the
+   grid has 1 column on a phone and 4 or 5 on a wide screen, with no media queries needed. */
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+  list-style: none; /* no bullet points */
+  margin: 0;
+  padding: 0;
+}
+
+/* One card: a bordered box. height: 100% makes every card in a row as tall as the row. */
+.product-card {
+  height: 100%;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+/* The link that fills the card. display: block makes the whole card area clickable. */
+.product-card-link {
+  display: block;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 1rem;
+  color: inherit;
+  text-decoration: none;
+  border-radius: 6px;
+}
+
+/* Hovering lightly shades the card, so it's clear it can be clicked. */
+.product-card-link:hover {
+  background: #f5f8fc;
+}
+
+/* The same keyboard focus outline as the provider buttons. */
+.product-card-link:focus-visible {
+  outline: 3px solid #1a4fa0;
+  outline-offset: 2px;
+}
+
+.product-name {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+  color: #1a4fa0;
+}
+
+/* The description, cut to 2 lines with "…" at the end.
+   -webkit-line-clamp needs display: -webkit-box and -webkit-box-orient: vertical to work; all
+   current browsers support it, despite the -webkit- prefix. overflow: hidden hides the rest.
+   min-height reserves 2 lines (line-height 1.4 × 2 = 2.8em), so a short description doesn't
+   make its card shorter than its neighbours. */
+.product-description {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.4;
+  min-height: 2.8em;
+  margin: 0 0 0.5rem;
+  color: #444;
+}
+
+.product-price {
+  margin: 0;
+  font-weight: bold;
+}
+
+/* "Out of stock": small, red and in capitals, so it stands out on the card. */
+.out-of-stock {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  color: #b00020;
+}
