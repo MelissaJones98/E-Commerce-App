@@ -6,3 +6,5 @@ node_modules/
 
 # Claude's handover notes for new sessions (kept locally, not committed)
 HANDOVER.md
+
+.claude/
