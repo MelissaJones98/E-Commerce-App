@@ -42,6 +42,13 @@ function clickRegister() {
   userEvent.click(screen.getByRole('button', { name: 'Register' }));
 }
 
+// The fetch calls made to /auth/register, each as [url, options]. The app also calls /auth/me
+// when it starts (to find out who's logged in), so tests look only at the register calls.
+// .filter() keeps the calls whose url (the first argument) is '/auth/register'.
+function registerCalls() {
+  return global.fetch.mock.calls.filter(([url]) => url === '/auth/register');
+}
+
 // Before each test, replace fetch with a fresh Jest mock function (jest.fn()), which records
 // every call. Each test then says what it should return.
 beforeEach(() => {
@@ -88,9 +95,9 @@ test('registers with exactly the four API fields, then shows the Products page',
   clickRegister();
 
   expect(await screen.findByRole('heading', { level: 1, name: 'Products' })).toBeInTheDocument();
-  expect(global.fetch).toHaveBeenCalledTimes(1);
-  // mock.calls[0] is the list of arguments of the first call: [url, options].
-  const [url, options] = global.fetch.mock.calls[0];
+  expect(registerCalls()).toHaveLength(1);
+  // registerCalls()[0] is the list of arguments of the first register call: [url, options].
+  const [url, options] = registerCalls()[0];
   expect(url).toBe('/auth/register');
   expect(options.method).toBe('POST');
   expect(options.headers).toEqual({ 'Content-Type': 'application/json' });
@@ -113,7 +120,7 @@ test('shows an error and does not call the API when the passwords do not match',
 
   // role="alert" makes screen readers announce the message as soon as it appears.
   expect(await screen.findByRole('alert')).toHaveTextContent('Passwords do not match');
-  expect(global.fetch).not.toHaveBeenCalled();
+  expect(registerCalls()).toHaveLength(0);
   expect(screen.getByRole('heading', { level: 1, name: 'Register' })).toBeInTheDocument();
 });
 
@@ -205,7 +212,7 @@ test('sends only one request when Register is clicked twice', async () => {
   const button = await screen.findByRole('button', { name: 'Creating account…' });
   userEvent.click(button);
 
-  expect(global.fetch).toHaveBeenCalledTimes(1);
+  expect(registerCalls()).toHaveLength(1);
 });
 
 test('lets you fix a mistake and register successfully', async () => {
@@ -274,6 +281,6 @@ test('after an API error, you can change your details and retry successfully', a
   expect(await screen.findByRole('heading', { level: 1, name: 'Products' })).toBeInTheDocument();
 
   // Two requests in total, and the second one sent the corrected email.
-  expect(global.fetch).toHaveBeenCalledTimes(2);
-  expect(JSON.parse(global.fetch.mock.calls[1][1].body).email).toBe('ada.lovelace@example.com');
+  expect(registerCalls()).toHaveLength(2);
+  expect(JSON.parse(registerCalls()[1][1].body).email).toBe('ada.lovelace@example.com');
 });

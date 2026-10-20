@@ -21,12 +21,13 @@ browsing products, and completing a purchase.
 - Deploy the application using Render
 
 ## Database
-The database has eight tables: `customers`, `federated_credentials`, `addresses`, `categories`,
-`products`, `cart_items`, `orders`, and `order_items`. `cart_items` holds each customer's
-shopping cart (one row per product in it), and `order_items` links each order to the products it
-contains. `federated_credentials` links a Google or Facebook account to a customer, so they can
-sign in with it. Customers who only sign in that way have no password (`password_hash` is
-`NULL`).
+The database has nine tables: `customers`, `federated_credentials`, `addresses`, `categories`,
+`products`, `cart_items`, `orders`, `order_items` and `session`. `cart_items` holds each
+customer's shopping cart (one row per product in it), and `order_items` links each order to the
+products it contains. `federated_credentials` links a Google or Facebook account to a customer,
+so they can sign in with it. Customers who only sign in that way have no password
+(`password_hash` is `NULL`). `session` holds login sessions, so restarting the API doesn't log
+anyone out.
 
 The full design, including the Entity Relationship Diagram, column types, relationships, and the
 reasoning behind each design decision, is in [docs/database-design.md](docs/database-design.md).
@@ -64,7 +65,8 @@ e-commerce-app/
 │   │   ├── migrations/     # Updates an existing database to match schema.sql
 │   │   │   ├── 001-add-categories.sql
 │   │   │   ├── 002-add-cart-items.sql
-│   │   │   └── 003-add-federated-credentials.sql
+│   │   │   ├── 003-add-federated-credentials.sql
+│   │   │   └── 004-add-session-table.sql
 │   │   └── reset-test-db.js # Rebuilds the test database from schema.sql
 │   ├── tests/
 │   │   ├── auth.register.test.js # Tests for POST /auth/register
@@ -72,6 +74,7 @@ e-commerce-app/
 │   │   ├── auth.providers.test.js    # Google/Facebook routes when they're switched off
 │   │   ├── auth.providers-on.test.js # Google/Facebook routes and verify functions, with fake keys
 │   │   ├── federated-login.test.js   # Tests for the Google/Facebook sign-in rules
+│   │   ├── sessions.test.js      # Sessions: stored in PostgreSQL, 7-day cookie, GET /auth/me, logging out
 │   │   ├── products.test.js      # Tests for the /products routes
 │   │   ├── account.test.js       # Tests for the /account routes
 │   │   ├── cart.test.js          # Tests for the /cart routes
@@ -82,7 +85,7 @@ e-commerce-app/
 │   │   └── e2e/            # End-to-end tests, run by Newman against the running server
 │   │       └── ecommerce-api.e2e.postman_collection.json
 │   ├── .env                # Your local settings (not committed, see below)
-│   ├── .env.test           # Test settings: test database name and a test-only session secret
+│   ├── .env.test           # Test settings: test database, test-only secret, providers and session clean-up off
 │   └── package.json
 ├── front-end/              # React app (Create React App)
 │   ├── public/
@@ -93,16 +96,22 @@ e-commerce-app/
 │   │   ├── App.css         # Styles for the header, nav, page area and forms
 │   │   ├── routes.js       # Route table: which page to show for each URL
 │   │   ├── api/
-│   │   │   └── auth.js     # Calls the API's /auth endpoints (register, login, which providers are on)
+│   │   │   └── auth.js     # Calls the API's /auth endpoints (register, login, logout, who's logged in, providers)
+│   │   ├── auth/
+│   │   │   ├── AuthContext.js  # Who's logged in, shared with every page (useAuth())
+│   │   │   ├── RequireAuth.js  # Guard: pages that need you logged in (else go to Log in)
+│   │   │   ├── GuestOnly.js    # Guard: Log in and Register (logged in? go back to the page you wanted)
+│   │   │   ├── AuthContext.test.js # Tests for the login record and logging out
+│   │   │   └── access.test.js  # Tests for the nav, the guards, and logging in/out in the app
 │   │   ├── components/
-│   │   │   └── Layout.js   # Header, main nav and the area where each page appears
+│   │   │   └── Layout.js   # Header, main nav (changes when you log in) and the page area
 │   │   ├── pages/          # One component per page (Register and Log in work; the rest are placeholders)
 │   │   │   ├── RegisterPage.test.js # Tests for the registration form
 │   │   │   └── LoginPage.test.js    # Tests for the login form, provider links and sign-in errors
 │   │   ├── setupProxy.js   # Dev only: sends Google/Facebook sign-in page visits on to the API
 │   │   ├── routes.test.js  # Tests for every page URL and the navigation
 │   │   ├── App.test.js     # Tests that App shows the home page
-│   │   ├── test-utils.js   # Shared test helper: renders the app at any URL
+│   │   ├── test-utils.js   # Shared test helper: renders the app at any URL, logged in or out
 │   │   └── setupTests.js   # Test setup: jest-dom matchers and a TextEncoder polyfill
 │   ├── .env.development    # Dev server settings: runs React on port 3001
 │   └── package.json        # Also holds "proxy": passes API requests on to port 3000
@@ -132,7 +141,7 @@ Using **pgAdmin 4**:
 1. Right-click **Databases → Create → Database…**, name it `ecommerce`, and click **Save**.
 2. Select the `ecommerce` database, open **Tools → Query Tool**, and check the tab title starts with `ecommerce/`.
 3. Open `back-end/db/schema.sql`, then click **Execute** (or press F5).
-4. Refresh the database: `addresses`, `cart_items`, `categories`, `customers`, `federated_credentials`, `order_items`, `orders`, and `products` appear under **Schemas → public → Tables**.
+4. Refresh the database: `addresses`, `cart_items`, `categories`, `customers`, `federated_credentials`, `order_items`, `orders`, `products`, and `session` appear under **Schemas → public → Tables**.
 
 Or using **psql** from the project root:
 ```bash
@@ -151,10 +160,16 @@ above (pgAdmin Query Tool → open file → Execute):
 | `001-add-categories.sql` | Adds the `categories` table and `products.category_id` |
 | `002-add-cart-items.sql` | Adds the `cart_items` table (shopping carts) |
 | `003-add-federated-credentials.sql` | Adds the `federated_credentials` table (Google and Facebook sign-in) and lets `customers.password_hash` be empty |
+| `004-add-session-table.sql` | Adds the `session` table (login sessions that survive restarts) |
 
 To check which migrations a database already has, refresh it in pgAdmin and look under
 **Schemas → public → Tables**: `categories` means 001 has run, `cart_items` means 002 has run,
-and `federated_credentials` means 003 has run.
+`federated_credentials` means 003 has run, and `session` means 004 has run.
+
+Run 004 **before** starting the API with this version. Without the `session` table, the API
+can't read or save sessions: logging in fails, and any request from a browser that already has
+a session cookie (even browsing products) gets a `500 Internal Server Error`. The React app then
+just looks logged out. If that happens, run 004 and restart the API.
 
 Each migration runs once. Running one again fails with an error (e.g. "relation already exists")
 and changes nothing, because each runs inside a transaction.
@@ -204,6 +219,7 @@ npm start      # runs without auto-restart
 | `POST /auth/register` | Creates a customer account (see below) |
 | `POST /auth/login` | Logs in with email and password (see below) |
 | `POST /auth/logout` | Logs out (must be logged in) |
+| `GET /auth/me` | Who's logged in (the customer, or `null`) |
 | `GET /auth/providers` | Which of Google and Facebook sign-in are switched on |
 | `GET /auth/google`, `GET /auth/facebook` | Sign in with Google or Facebook (visited by the browser; see below) |
 | `GET /products` | Lists products; add `?category=1` to filter by category |
@@ -304,11 +320,35 @@ Send a **POST** request to `http://localhost:3000/auth/logout` with no body.
 
 | Response | When |
 |---|---|
-| `204 No Content` | Logged out |
+| `204 No Content` | Logged out: the session is deleted, and the response tells the browser to delete the cookie |
 | `401 Unauthorized` | You weren't logged in |
 
-Sessions are currently stored in the server's memory, so restarting the server (including
-`npm run dev` restarting after you save a file) logs everyone out.
+Once you've logged out, the old session cookie can never log anyone in again, even if someone
+had copied it.
+
+#### Who's logged in
+Send a **GET** request to `http://localhost:3000/auth/me`. It always returns `200`:
+`{ "customer": { "id": 1, "first_name": "Ada", ... } }` when you're logged in, or
+`{ "customer": null }` when you're not. The React app asks this when it loads, to decide what
+the nav shows and which pages you can open.
+
+#### How login sessions work
+Logging in (or registering, or signing in with Google or Facebook) creates a **session**: a row
+in the `session` table that says which customer is logged in. Your browser gets a cookie,
+`connect.sid`, holding only the session's id.
+- **Sessions are stored in PostgreSQL**, using
+  [connect-pg-simple](https://github.com/voxpelli/node-connect-pg-simple), not in the server's
+  memory. Restarting the API (including `npm run dev` restarting after you save a file) doesn't
+  log anyone out.
+- **A login lasts 7 days from your last visit.** Every request renews the cookie and the stored
+  session, so someone shopping regularly is never logged out mid-shop; someone who stays away
+  for 7 days is.
+- **The cookie is `HttpOnly`** (page scripts can't read it, so a malicious script can't steal
+  it) **and `SameSite=Lax`** (it's sent when you visit the site, including coming back from
+  Google or Facebook, but not with requests other websites make in the background).
+- **Expired sessions are deleted** from the table every 15 minutes.
+- **When the app is deployed** (the Render ticket), it must also set `secure: true` on the
+  cookie (HTTPS only) and `app.set('trust proxy', 1)`, because Render runs the app behind a proxy.
 
 #### Browse products
 These routes are public; no login needed. Try them in Postman or your browser:
@@ -632,14 +672,37 @@ line to keep the check on.
 | `/products/:productId` | A single product |
 | `/register` | Register: create an account (signs you in, then goes to Products) |
 | `/login` | Log in: with email and password, or "Sign in with Google / Facebook" (when set up); links to Register |
-| `/account` | Your account |
-| `/cart` | Your cart (links to checkout) |
-| `/checkout` | Checkout |
-| `/orders` | Your orders |
-| `/orders/:orderId` | A single order |
+| `/account` | Your account (log in needed) |
+| `/cart` | Your cart, linking to checkout (log in needed) |
+| `/checkout` | Checkout (log in needed) |
+| `/orders` | Your orders (log in needed) |
+| `/orders/:orderId` | A single order (log in needed) |
 | anything else | Page not found |
 
 The nav bar at the top links to the main pages and highlights the one you're on.
+
+**Logged in or not:** when the app loads, it asks the API who's logged in (`GET /auth/me`), and
+the nav only shows what you can use:
+
+| | Nav shows |
+|---|---|
+| Logged out | Products · Log in · Register |
+| Logged in | Products · Cart · Orders · Account · "Hi, Ada" · **Log out** button |
+| Still checking (a split second on load) | Products only |
+
+- **Pages that need you logged in** (Account, Cart, Checkout, Orders and a single order) send a
+  logged-out visitor to the Log in page. After logging in, you go back to the page you wanted,
+  including any `?query` part. While the app is still checking who's logged in, those pages
+  show "Loading…" instead, so a logged-in customer is never sent to Log in by mistake.
+- **Log in and Register** send a customer who's already logged in to Products.
+- **Logging in, registering and Google/Facebook sign-in** update the nav straight away.
+- **Log out** ends the session on the server, then shows Products with the logged-out nav. If
+  the server can't be reached, you stay logged in and see "Could not log out. Please try again."
+
+The "page you wanted" is passed along inside the app (React Router's navigation *state*), not
+in the address bar, so nobody can make a link that sends a customer to another website after
+they log in. It isn't remembered across Google or Facebook sign-in, which leaves the app and
+comes back: those always return to Products.
 
 **Why React Router v7, not the newest v8?** v8 is only published as ES modules, which the
 test runner built into Create React App (Jest 27) can't load. v7 works the same way for
@@ -747,7 +810,9 @@ These tests use a separate `ecommerce_test` database, so they never touch your r
 connection details come from your `.env`. It also sets the Google and Facebook keys to empty
 values, so the tests always run with both providers switched off, even after you've put real
 keys in `.env`. (The tests that need a provider switched on set fake keys themselves, so they
-never contact Google or Facebook.)
+never contact Google or Facebook.) Finally, `SESSION_PRUNE=off` stops the session store's
+15-minute clean-up timer during tests, because a running timer would stop the test process from
+exiting when the tests finish.
 
 Create the test database once, from the `back-end` folder:
 ```bash
@@ -812,10 +877,10 @@ installed in the project's `node_modules`.
 
 | Folder | Requests | Checks |
 |---|---|---|
-| 1. Register and log in | Register a new test customer; view the account straight away; log in; ask which sign-in providers are on | `201` and a session cookie; `200` (registering logged us in); `200` and a session cookie; `200` with `google` and `facebook` as true/false |
+| 1. Register and log in | Register a new test customer; view the account straight away; ask who's logged in; log in; ask which sign-in providers are on | `201` and a session cookie; `200` (registering logged us in); `200` with that customer; `200` and a session cookie with an expiry date; `200` with `google` and `facebook` as true/false |
 | 2. Account | View, update, view again, an invalid update, a logged-out view | `200`, `200`, the update was saved, `400`, `401` |
 | 3. Cart | Create a test product (8.50, 5 in stock); view the empty cart; add 2; add 1 more; try to add 3 more; change the quantity to 1; remove it; remove it again; add it back; empty the cart; view it; view it logged out; retire the product | `201`; empty cart; total `17.00`; quantities added together to 3, total `25.50`; `409` (6 > 5 in stock); total `8.50`; `204`; `404`; `201`; `204`; empty cart; `401`; `204` |
-| 4. Delete account (clean-up) | Delete the account, then try to use it again | `204`, then `401` and `401` |
+| 4. Log out, then delete the account (clean-up) | Log out; ask who's logged in; log in again; delete the account, then try to use it again | `204` and the cookie cleared; `customer: null`; `200`; `204`, then `401` and `401` |
 | 5. Checkout and orders | Register and log in a second customer; create a product (8.50, 5 in stock); add 2 to the cart; check out with a mistyped card, then a declined card; view the cart; check out successfully; view the cart and the product's stock; view the order history and the order's details; view an order that doesn't exist; view the history logged out; check out the empty cart; check out logged out; try to delete the account | `201`, `200`, `201`, total `17.00`; `400`, `402`; cart still holds 2; `201` paid order for `17.00` with the card number never sent back; empty cart, stock down to 3; exactly one order (paid, `17.00`, 2 items), with details matching what checkout returned; `404`; `401`; `400`; `401`; `409` (order history is protected) |
 | 6. API documentation | Open the Swagger UI page; get the OpenAPI spec | `200` HTML page that loads Swagger UI; `200` OpenAPI 3.0 spec documenting the main endpoints |
 
@@ -830,9 +895,9 @@ of the **failed** column:
 ┌─────────────────────────┬───────────────────┬──────────────────┐
 │                         │          executed │           failed │
 ├─────────────────────────┼───────────────────┼──────────────────┤
-│                requests │                44 │                0 │
-│            test-scripts │                88 │                0 │
-│              assertions │               122 │                0 │
+│                requests │                48 │                0 │
+│            test-scripts │                96 │                0 │
+│              assertions │               134 │                0 │
 └─────────────────────────┴───────────────────┴──────────────────┘
 ```
 Newman exits with code `0` when everything passes and `1` when anything fails, so it can be
@@ -885,6 +950,8 @@ journey order.
 - bcryptjs: password hashing (pure-JavaScript bcrypt)
 - Passport.js: logging in, with `passport-local` (email and password),
   `passport-google-oauth20` (Sign in with Google) and `passport-facebook` (Sign in with Facebook)
+- express-session and connect-pg-simple: login sessions, stored in PostgreSQL
+- React context: shares who's logged in with every page of the React app
 - http-proxy-middleware: sends the Google and Facebook sign-in visits from the React dev server
   to the API
 - Node.js test runner (`node:test`) and Supertest: unit and integration tests
@@ -1095,13 +1162,17 @@ errors can reveal how the app works internally.
 
 ### Testing
 The API is built using test-driven development (TDD): each test is written first and run to
-confirm it fails, then just enough code is added to make it pass. There are 287 tests:
+confirm it fails, then just enough code is added to make it pass. There are 296 tests:
 - **Registration (31):** successful registration, being logged in straight away (and not after
   a failed registration), duplicate accounts (including simultaneous requests), and each type of
   invalid input above
 - **Login and logout (18):** successful login, staying logged in across requests, the `HttpOnly`
   session cookie, identical errors for a wrong password and an unknown email, accounts with no
   password, missing details, and logging out
+- **Sessions (9):** sessions stored in the database (deleting the stored row logs you out, which
+  is what makes restarts harmless), the 7-day `HttpOnly`, `SameSite=Lax` cookie, each visit
+  renewing it, expired sessions counting as logged out, `GET /auth/me` logged in and out, and
+  logging out deleting the stored session, clearing the cookie and making the old cookie useless
 - **Google and Facebook sign-in (22):** the sign-in rules (a new customer with no password,
   linking to an existing customer by verified email, emails in any letter case, signing in
   twice without duplicates, still finding a customer who changed their email, linking both
@@ -1134,24 +1205,33 @@ confirm it fails, then just enough code is added to make it pass. There are 287 
 
 Every test runs against a real PostgreSQL test database, not mocks.
 
-On top of these, an **end-to-end test collection** run by Newman (44 requests, 122 checks) takes
-customers through registering (and being logged in straight away), logging in, checking which
-sign-in providers are on, viewing and updating their account, filling,
-changing and emptying their cart, deleting their account, checking out (including a
+On top of these, an **end-to-end test collection** run by Newman (48 requests, 134 checks) takes
+customers through registering (and being logged in straight away), checking who's logged in,
+logging in, checking which sign-in providers are on, viewing and updating their account, filling,
+changing and emptying their cart, logging out, deleting their account, checking out (including a
 mistyped card and a declined payment), and viewing their order history, then checks the API
 documentation is served, using the real running server and the test
 database. It also checks that no response ever contains
 a password. It has been confirmed to fail (exit code `1`) when the server isn't running, so a
 broken server can't produce a passing run.
 
-The **front end** has 55 tests (Jest and React Testing Library). The registration form's 12
+The **front end** has 86 tests (Jest and React Testing Library). The registration form's 12
 tests check its fields, the link to log in, the exact request sent (never the confirm
 password), mismatched passwords, API and network errors (including the dev proxy's own error
 page), the button while sending, double-clicks, and retrying after a password mismatch or an
 API error. The login page's 14 tests check its fields, the link to Register, the exact request
 sent, wrong details and network errors, the button while sending, a "Sign in with..." link for
 each provider that's switched on (and none if that can't be checked), and the message for each
-sign-in error code, including that a made-up code is never shown. The API is
+sign-in error code, including that a made-up code is never shown. The login record's 8 tests
+check it waits for the API, ignores a slow answer that arrives after logging in, uses the
+logged-in customer (or nobody, if the API can't be reached), updates everywhere at once, and
+logs out (a `401` counting as already logged out, and
+a failed logout keeping you logged in). The 23 access tests check the nav when logged out,
+logged in and still checking, "Hi there" without a first name, every protected page sending a
+logged-out visitor to Log in (but never while still checking), Log in and Register sending a
+logged-in customer to Products, logging in returning to the page you wanted (`?query`
+included), registering updating the nav, and logging out from Cart landing on Products, plus
+a failed logout. The API is
 replaced by a fake `fetch`, so no server is needed. The other 29 check every page URL showing the
 right page (one `<h1>` each), product and order ids read from the URL, unknown URLs (including
 extra segments after a real page) showing "Page not found" with the nav still there, every nav

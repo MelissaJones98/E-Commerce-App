@@ -197,6 +197,34 @@
           }
         },
         {
+          "name": "Who's logged in (after registering)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The React app asks this when it loads, to decide what the nav shows.",
+                  "pm.test('status is 200 OK', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('it is the customer who just registered', function () {",
+                  "  // Number() makes sure we compare a number with a number.",
+                  "  pm.expect(pm.response.json().customer.id).to.equal(Number(pm.collectionVariables.get('customerId')));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/auth/me",
+            "description": "GET /auth/me: who's logged in. Expects 200 with the customer who just registered."
+          }
+        },
+        {
           "name": "Log in",
           "event": [
             {
@@ -219,6 +247,12 @@
                   "// by express-session). pm.cookies holds the cookies from this response.",
                   "pm.test('sets the session cookie', function () {",
                   "  pm.expect(pm.cookies.has('connect.sid')).to.be.true;",
+                  "});",
+                  "",
+                  "// The cookie has an expiry date (7 days ahead), so the login survives closing",
+                  "// the browser. pm.cookies doesn't show cookie settings, so read the raw header.",
+                  "pm.test('the session cookie has an expiry date', function () {",
+                  "  pm.expect(pm.response.headers.get('Set-Cookie')).to.match(/Expires=/i);",
                   "});"
                 ]
               }
@@ -864,9 +898,95 @@
       ]
     },
     {
-      "name": "4. Delete account (clean-up)",
-      "description": "Deletes the test customer, then proves the account and its session are really gone. Deleting the account also deletes anything left in their cart (ON DELETE CASCADE).",
+      "name": "4. Log out, then delete the account (clean-up)",
+      "description": "Logs out and proves the session has ended, logs back in, then deletes the test customer and proves the account and its session are really gone. Deleting the account also deletes anything left in their cart (ON DELETE CASCADE).",
       "item": [
+        {
+          "name": "Log out",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 204 No Content: logged out, with nothing to send back.",
+                  "pm.test('status is 204 No Content', function () {",
+                  "  pm.response.to.have.status(204);",
+                  "});",
+                  "",
+                  "// The server deletes the session and tells the browser to delete its cookie,",
+                  "// by sending connect.sid again with an empty value and a date in 1970.",
+                  "pm.test('tells the browser to delete the session cookie', function () {",
+                  "  pm.expect(pm.response.headers.get('Set-Cookie')).to.match(/^connect\\.sid=;.*1970/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/auth/logout",
+            "description": "POST /auth/logout: ends the test customer's session. Expects 204 and a Set-Cookie that clears connect.sid."
+          }
+        },
+        {
+          "name": "Who's logged in (after logging out)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Always 200: 'nobody' is a normal answer, not an error.",
+                  "pm.test('status is 200 OK', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('nobody is logged in', function () {",
+                  "  pm.expect(pm.response.json().customer).to.equal(null);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/auth/me",
+            "description": "GET /auth/me straight after logging out. Expects 200 with customer null: the session really ended."
+          }
+        },
+        {
+          "name": "Log in again (to delete the account)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Deleting an account needs a logged-in customer, so log back in first.",
+                  "pm.test('status is 200 OK', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/login",
+            "description": "POST /auth/login: logs the test customer back in, so the next request can delete their account."
+          }
+        },
         {
           "name": "Delete account",
           "event": [

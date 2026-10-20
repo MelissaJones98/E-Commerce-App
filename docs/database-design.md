@@ -188,6 +188,26 @@ login: another service vouches for who the person is). Added by migration 003.
 - **Why a separate table** rather than `google_id` and `facebook_id` columns on `customers`: a
   customer can link any number of providers, and adding a provider later needs no new column.
 
+### session
+
+Login sessions, so the server remembers who's logged in between requests and across restarts.
+The browser holds only a cookie with the session's id; the session's data lives here. Added by
+migration 004.
+
+| Column | Type | Constraints |
+|---|---|---|
+| sid | varchar | PK. The session id (inside the `connect.sid` cookie) |
+| sess | json | NOT NULL. The session's data, e.g. `{"cookie": {...}, "passport": {"user": 1}}` |
+| expire | timestamp(6) | NOT NULL. When the session runs out (7 days after the last request) |
+
+- **Index on `expire`:** expired sessions are deleted every 15 minutes (`WHERE expire < now()`).
+- **Managed by a library:** `connect-pg-simple` reads and writes this table for express-session,
+  so its columns are the ones that library expects.
+- **Not in the diagram, and no foreign key to `customers`:** the logged-in customer's id lives
+  inside `sess` (at `passport.user`), and a session can exist before anyone logs in. Deleting a
+  customer doesn't need to delete their sessions: the next request finds no customer with that
+  id and treats the session as logged out.
+
 ### addresses
 
 | Column | Type | Constraints |

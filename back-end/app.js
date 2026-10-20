@@ -9,10 +9,14 @@
 
 // Express: the web framework that receives HTTP requests and sends responses.
 import express from 'express';
-// query(): runs a SQL statement against PostgreSQL (see db/index.js).
-import { query } from './db/index.js';
+// query(): runs a SQL statement against PostgreSQL (see db/index.js). `pool` (the default
+// export) is the connection pool itself, which the session store below shares.
+import pool, { query } from './db/index.js';
 // express-session: remembers visitors between requests using a cookie.
 import session from 'express-session';
+// connect-pg-simple: lets express-session keep its sessions in PostgreSQL (the `session`
+// table) instead of the server's memory.
+import connectPgSimple from 'connect-pg-simple';
 // Passport, already configured to check logins (see config/passport.js).
 import passport from './config/passport.js';
 // Each router holds a group of related routes, defined in its own file.
@@ -59,8 +63,31 @@ app.use(express.json());
 // a random session ID. Their session data (e.g. which customer is logged in)
 // is kept on the server under that ID, and the browser sends the cookie back
 // with every request so the server knows who they are.
+
+// connectPgSimple(session) returns a "store" class: the place express-session
+// keeps sessions. Without one, express-session keeps them in the server's
+// memory, so every restart (including each `npm run dev` reload) logged
+// everyone out.
+const PgStore = connectPgSimple(session);
+
+// How long a login lasts: 7 days, in milliseconds
+// (7 days × 24 hours × 60 minutes × 60 seconds × 1000 ms).
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
 app.use(
   session({
+    // Keep sessions in the `session` table (see db/schema.sql).
+    store: new PgStore({
+      // Share the app's existing database connections instead of opening more.
+      pool,
+      tableName: 'session',
+      // The store deletes expired sessions every 15 minutes by default. The
+      // tests switch that timer off (SESSION_PRUNE=off in .env.test): a timer
+      // would keep the test process running after the tests finish.
+      // `condition ? a : b` picks a if condition is true, else b; undefined
+      // means "use the default".
+      pruneSessionInterval: process.env.SESSION_PRUNE === 'off' ? false : undefined,
+    }),
     // The secret used to sign the cookie (checked above).
     secret: process.env.SESSION_SECRET,
     // resave: false means don't save the session again if nothing changed.
@@ -68,9 +95,26 @@ app.use(
     // saveUninitialized: false means don't create a session (or send a
     // cookie) until something is stored in it, i.e. until someone logs in.
     saveUninitialized: false,
-    // HttpOnly: JavaScript running in the browser can't read the cookie, so a
-    // malicious script injected into a web page can't steal it.
-    cookie: { httpOnly: true },
+    // rolling: true sends a fresh cookie (and pushes the stored expiry back) on
+    // every request, so the 7 days count from the LAST visit. Someone shopping
+    // regularly is never logged out; someone away for 7 days is.
+    rolling: true,
+    cookie: {
+      // HttpOnly: JavaScript running in the browser can't read the cookie, so a
+      // malicious script injected into a web page can't steal it.
+      httpOnly: true,
+      // SameSite=Lax: the browser sends the cookie when you navigate to this
+      // site (including coming back from Google or Facebook), but not with
+      // requests other websites make in the background. It's the browsers'
+      // default anyway; writing it here makes it explicit.
+      sameSite: 'lax',
+      // maxAge: the cookie expires 7 days after it's sent (express-session
+      // turns this into an "Expires" date). Without it, the cookie was deleted
+      // when the browser closed.
+      maxAge: SEVEN_DAYS_MS,
+      // Not set here: `secure` (send the cookie over HTTPS only). Running on
+      // http://localhost needs it off; turn it on when the app is deployed.
+    },
   })
 );
 

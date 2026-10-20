@@ -105,6 +105,32 @@ CREATE TABLE federated_credentials (
 CREATE INDEX federated_credentials_customer_id_idx ON federated_credentials (customer_id);
 
 -- ---------------------------------------------------------------------------
+-- session
+-- ---------------------------------------------------------------------------
+-- Login sessions, so the server remembers who's logged in. The browser only
+-- holds a cookie with the session's id (sid); the session's data lives here.
+-- Keeping it in the database (instead of the server's memory) means
+-- restarting the API doesn't log everyone out.
+--
+-- The connect-pg-simple library reads and writes this table for
+-- express-session, so its columns are the ones that library expects. There's
+-- no foreign key to customers: the logged-in customer's id is stored inside
+-- `sess` (at sess.passport.user), and a session can exist before anyone logs in.
+
+CREATE TABLE session (
+  -- The session id (the value inside the connect.sid cookie, before its signature).
+  sid    varchar      NOT NULL PRIMARY KEY,
+  -- The session's data as JSON, e.g. {"cookie": {...}, "passport": {"user": 1}}.
+  sess   json         NOT NULL,
+  -- When the session runs out. timestamp(6) keeps microseconds.
+  expire timestamp(6) NOT NULL
+);
+
+-- The library regularly deletes expired sessions (WHERE expire < now()); this
+-- index lets it find them without reading the whole table.
+CREATE INDEX session_expire_idx ON session (expire);
+
+-- ---------------------------------------------------------------------------
 -- addresses
 -- ---------------------------------------------------------------------------
 

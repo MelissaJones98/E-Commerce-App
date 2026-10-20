@@ -16,32 +16,40 @@ import userEvent from '@testing-library/user-event';
 // router, so a test can drive it directly (e.g. press "Back" with router.navigate(-1)).
 import { renderAt } from './test-utils';
 
-// Helper: find the main nav bar. `function name(params) { ... }` declares a function. `async` marks a function that uses `await`; `await` pauses
-// until a Promise (a value that arrives later) is ready. findBy... queries keep retrying for a
-// short time, which suits React Router because it can update the page a moment after a click.
+// Helper: find the main nav bar. `function name(params) { ... }` declares a function.
+// `async` marks a function that uses `await`; `await` pauses until a Promise (a value that
+// arrives later) is ready. findBy... queries keep retrying for a short time, which suits React
+// Router because it can update the page a moment after a click.
 async function findNav() {
   return screen.findByRole('navigation', { name: 'Main' });
 }
 
-// Each row is [url, the page's <h1> heading]: one row for every route in routes.js.
+// The customer these tests log in as. Pages such as Cart and Orders need someone logged in
+// (see auth/RequireAuth.js), so tests that open them pass { customer: ada } to renderAt.
+const ada = { id: 1, first_name: 'Ada', last_name: 'Lovelace', email: 'ada@example.com' };
+
+// Each row is [url, the page's <h1> heading, who's logged in]: one row for every route in
+// routes.js. Log in and Register are only for logged-out visitors, so they're opened logged out
+// (null); every other page is opened logged in. (auth/access.test.js tests the other cases.)
 // `const` declares a variable that can't be reassigned.
 const pages = [
-  ['/', 'Products'],
-  ['/products/42', 'Product'],
-  ['/register', 'Register'],
-  ['/login', 'Log in'],
-  ['/account', 'Your account'],
-  ['/cart', 'Your cart'],
-  ['/checkout', 'Checkout'],
-  ['/orders', 'Your orders'],
-  ['/orders/7', 'Order'],
-  ['/no-such-page', 'Page not found'],
+  ['/', 'Products', ada],
+  ['/products/42', 'Product', ada],
+  ['/register', 'Register', null],
+  ['/login', 'Log in', null],
+  ['/account', 'Your account', ada],
+  ['/cart', 'Your cart', ada],
+  ['/checkout', 'Checkout', ada],
+  ['/orders', 'Your orders', ada],
+  ['/orders/7', 'Order', ada],
+  ['/no-such-page', 'Page not found', ada],
 ];
 
 // test.each runs the same test once per row. Each row's values arrive as the arguments
-// (url, heading), and `%s` in the test name is replaced by them, so each run has its own name.
-test.each(pages)('%s shows the "%s" page', async (url, heading) => {
-  renderAt(url);
+// (url, heading, customer), and `%s` in the test name is replaced by the first two, so each run
+// has its own name.
+test.each(pages)('%s shows the "%s" page', async (url, heading, customer) => {
+  renderAt(url, { customer });
 
   // findByRole('heading', { level: 1, ... }) waits for an <h1>; `name` is its visible text (exact
   // match). expect(...).toBeInTheDocument() comes from jest-dom (loaded in setupTests.js).
@@ -85,41 +93,48 @@ test('a product page shows the product id from the URL', async () => {
 });
 
 test('an order page shows the order id from the URL', async () => {
-  renderAt('/orders/7');
+  renderAt('/orders/7', { customer: ada });
 
   expect(await screen.findByText('Order id: 7')).toBeInTheDocument();
 });
 
 // ----- The nav bar -----
 
-// Each row is [the nav link's text, the heading of the page it should open].
+// Each row is [the nav link's text, the heading of the page it should open, who's logged in].
+// Cart, Orders and Account only appear in the nav when logged in; Log in and Register only when
+// logged out.
 const navTargets = [
-  ['Products', 'Products'],
-  ['Cart', 'Your cart'],
-  ['Orders', 'Your orders'],
-  ['Account', 'Your account'],
-  ['Log in', 'Log in'],
-  ['Register', 'Register'],
+  ['Products', 'Products', ada],
+  ['Cart', 'Your cart', ada],
+  ['Orders', 'Your orders', ada],
+  ['Account', 'Your account', ada],
+  ['Log in', 'Log in', null],
+  ['Register', 'Register', null],
 ];
 
-test.each(navTargets)('clicking the "%s" nav link opens the "%s" page', async (linkText, heading) => {
+test.each(navTargets)('clicking the "%s" nav link opens the "%s" page', async (linkText, heading, customer) => {
   // Start on the not-found page, so reaching ANY real page proves the click navigated.
-  renderAt('/no-such-page');
+  renderAt('/no-such-page', { customer });
 
   // within(nav) searches only inside the nav bar, so we click the nav's link and not some
-  // other link on the page with the same text.
-  userEvent.click(within(await findNav()).getByRole('link', { name: linkText }));
+  // other link on the page with the same text. findByRole waits for the link, because the nav
+  // shows only Products until the app has found out who's logged in.
+  userEvent.click(await within(await findNav()).findByRole('link', { name: linkText }));
 
   expect(await screen.findByRole('heading', { level: 1, name: heading })).toBeInTheDocument();
 });
 
 test("the current page's nav link is marked active, and Products is not", async () => {
-  renderAt('/cart');
+  renderAt('/cart', { customer: ada });
   const nav = await findNav();
 
   // NavLink sets aria-current="page" on the link to the current page, which screen readers
   // announce. (It also adds class="active", which is what App.css uses to highlight the link.)
-  expect(within(nav).getByRole('link', { name: 'Cart' })).toHaveAttribute('aria-current', 'page');
+  // findByRole waits for the Cart link, which appears once the app knows Ada is logged in.
+  expect(await within(nav).findByRole('link', { name: 'Cart' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
   // Products links to '/', which every URL starts with, but it must only be active on the home
   // page itself (React Router treats links to '/' that way).
   expect(within(nav).getByRole('link', { name: 'Products' })).not.toHaveAttribute('aria-current');
@@ -138,7 +153,7 @@ test('the Products nav link is marked active on the home page', async () => {
 // ----- Links between pages -----
 
 test('the cart page links to checkout', async () => {
-  renderAt('/cart');
+  renderAt('/cart', { customer: ada });
 
   userEvent.click(await screen.findByRole('link', { name: 'Go to checkout' }));
 
@@ -148,7 +163,7 @@ test('the cart page links to checkout', async () => {
 // ----- URLs people might type, and the Back button -----
 
 test('a URL with a trailing slash still finds its page', async () => {
-  renderAt('/cart/');
+  renderAt('/cart/', { customer: ada });
 
   expect(await screen.findByRole('heading', { level: 1, name: 'Your cart' })).toBeInTheDocument();
 });
@@ -175,9 +190,9 @@ test('extra path segments after a real page show "Page not found"', async () => 
 // stands in for the browser's Back button (which a test can't press).
 test('going back in history returns to the previous page', async () => {
   // Keep the router that renderAt returns, so the test can go back.
-  const router = renderAt('/cart');
+  const router = renderAt('/cart', { customer: ada });
 
-  userEvent.click(within(await findNav()).getByRole('link', { name: 'Orders' }));
+  userEvent.click(await within(await findNav()).findByRole('link', { name: 'Orders' }));
   await screen.findByRole('heading', { level: 1, name: 'Your orders' });
 
   // router.navigate(-1) goes one step back in history, like the browser's Back button.

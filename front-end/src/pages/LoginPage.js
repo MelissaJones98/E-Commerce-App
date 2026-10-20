@@ -9,12 +9,13 @@
 // useEffect: runs code AFTER the page has been drawn, e.g. to fetch data when it first appears.
 import { useEffect, useState } from 'react';
 // Link: a link that changes page without reloading.
-// useNavigate: a hook that returns a function for changing page from code (after logging in).
 // useSearchParams: reads the ?name=value part of the address, e.g. ?error=cancelled.
-import { Link, useNavigate, useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 // getProviders(): which "Sign in with..." providers are on. login(): sends the email and
 // password to the API (see ../api/auth.js). NO_PROVIDERS: "none are on".
 import { getProviders, login, NO_PROVIDERS } from '../api/auth';
+// useAuth(): the app-wide record of who's logged in (see ../auth/AuthContext.js).
+import { useAuth } from '../auth/AuthContext';
 
 // The display names for each provider, used in messages and on the buttons.
 const PROVIDER_NAMES = { google: 'Google', facebook: 'Facebook' };
@@ -67,8 +68,8 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   // providers: which "Sign in with..." links to show. Starts as "none" until the API answers.
   const [providers, setProviders] = useState(NO_PROVIDERS);
-  // navigate('/some/url') changes page from code.
-  const navigate = useNavigate();
+  // setCustomer(customer) tells the whole app who's now logged in (the nav updates straight away).
+  const { setCustomer } = useAuth();
 
   // Ask the API which providers are on, once, when the page first appears.
   // The empty array `[]` at the end means "run this only once", not after every re-draw.
@@ -89,7 +90,7 @@ export default function LoginPage() {
     event.preventDefault();
 
     // Log the customer in with the email and password in `form`.
-    // On success, go to the Products page; on failure, show the error and let them retry.
+    // On success, record who's logged in; on failure, show the error and let them retry.
 
     // "busy" state
     setError(null); // clears an old error message (including one from Google or Facebook)
@@ -100,9 +101,11 @@ export default function LoginPage() {
     try {
       // send the email and password to the API; this logs the customer in (sets the cookie).
       // `form` already holds exactly those two fields, so it can be sent as it is.
-      await login(form);
-      // the user goes straight to the products page
-      navigate('/');
+      // login() gives back the logged-in customer; record them for the whole app.
+      // There's no navigate() here: the login page sits inside GuestOnly (../auth/GuestOnly.js),
+      // which sees someone is now logged in and sends them on: to the page they wanted, or
+      // Products. One place doing the redirect means two redirects can't race each other.
+      setCustomer(await login(form));
     } catch (err) {
       setError(err.message); // show error and stop
       setSubmitting(false); // resets the submit button so the user can try again

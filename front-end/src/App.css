@@ -45,6 +45,28 @@
   text-decoration: underline;
 }
 
+/* "Hi, Ada" in the nav: plain text, slightly muted so it doesn't look like a link. */
+.nav-greeting {
+  color: #555;
+}
+
+/* The Log out button, styled to look like the nav links next to it. A <button> has its own
+   border, background and font by default; these remove them. */
+.nav-button {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit; /* the page's font and size, like the links */
+  color: #1a4fa0; /* the same blue as .nav-links a */
+  cursor: pointer; /* the pointing-hand cursor, like a link */
+}
+
+/* Underline on hover and keyboard focus, so it's clear it can be clicked. */
+.nav-button:hover,
+.nav-button:focus-visible {
+  text-decoration: underline;
+}
+
 /* The area where each page is drawn. */
 .page {
   padding: 1.5rem;

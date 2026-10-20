@@ -75,6 +75,7 @@ database tables:
 | `POST` | `/auth/register` | Public | Create a customer account | `201` |
 | `POST` | `/auth/login` | Public | Log in with email and password | `200` |
 | `POST` | `/auth/logout` | Customer | Log out | `204` |
+| `GET` | `/auth/me` | Public | Who's logged in (the customer, or `null`) | `200` |
 | `GET` | `/auth/providers` | Public | Which of Google and Facebook sign-in are switched on | `200` |
 | `GET` | `/auth/google` | Public | Start "Sign in with Google" | redirect |
 | `GET` | `/auth/google/callback` | Public | Google redirects back here after sign-in | redirect |
@@ -103,6 +104,18 @@ Errors: `400` missing fields or password too short, `409` email already register
 Response `200` is the customer (as above). Errors: `401` wrong email or password.
 Use the same message for both, so the response doesn't reveal which emails are registered.
 Accounts with no password (made by signing in with Google or Facebook) also get that `401`.
+
+**Sessions:** logging in (or registering, or signing in with Google/Facebook) sets the
+`connect.sid` cookie: `HttpOnly`, `SameSite=Lax`, and an `Expires` 7 days ahead. Every request
+renews it, so a login lasts until the customer has been away for 7 days. The session itself is
+stored in PostgreSQL (the `session` table), so restarting the API doesn't log anyone out.
+
+`GET /auth/me` response `200`: `{ "customer": { "id": 1, "first_name": "Ada", ... } }`, or
+`{ "customer": null }` when nobody is logged in. It never returns `401`, so a front end can call
+it on every page load.
+
+`POST /auth/logout` response `204`: the session is deleted from the store (the old cookie can't
+log anyone in again) and the response clears the cookie. Errors: `401` if not logged in.
 
 `GET /auth/providers` response `200`: `{ "google": true, "facebook": false }`. A provider is on
 when its keys are set in `back-end/.env`; when it's off, its four routes reply

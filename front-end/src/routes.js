@@ -4,6 +4,11 @@
 
 // Default imports (no braces): each file's main export.
 import Layout from './components/Layout';
+// `{ AuthProvider }`: a named import. It shares "who's logged in" with every page.
+import { AuthProvider } from './auth/AuthContext';
+// Guards: RequireAuth for pages that need you logged in, GuestOnly for logged-out-only pages.
+import RequireAuth from './auth/RequireAuth';
+import GuestOnly from './auth/GuestOnly';
 import ProductsPage from './pages/ProductsPage';
 import ProductDetailPage from './pages/ProductDetailPage';
 import RegisterPage from './pages/RegisterPage';
@@ -21,8 +26,14 @@ export const routes = [
     // The layout route matches every URL that starts with '/' (all of them) and draws Layout.
     // Layout's <Outlet /> then shows whichever child below matches the rest of the URL.
     path: '/',
-    // `element` is what to draw: JSX for the Layout component.
-    element: <Layout />,
+    // `element` is what to draw: the Layout component, inside AuthProvider so the nav and every
+    // page below can find out who's logged in (with useAuth()). It sits inside the router, so
+    // its children can still use React Router's hooks.
+    element: (
+      <AuthProvider>
+        <Layout />
+      </AuthProvider>
+    ),
     // Child paths have no leading '/': they're relative to the parent ('cart' means '/cart').
     children: [
       // `index: true` means "the child for exactly '/'", i.e. the home page.
@@ -30,13 +41,28 @@ export const routes = [
       // ':productId' is a URL parameter: it matches any one segment (e.g. '42') and the page
       // reads it with useParams(). The name must match what the page reads.
       { path: 'products/:productId', element: <ProductDetailPage /> },
-      { path: 'register', element: <RegisterPage /> },
-      { path: 'login', element: <LoginPage /> },
-      { path: 'account', element: <AccountPage /> },
-      { path: 'cart', element: <CartPage /> },
-      { path: 'checkout', element: <CheckoutPage /> },
-      { path: 'orders', element: <OrdersPage /> },
-      { path: 'orders/:orderId', element: <OrderDetailPage /> },
+      // A route with an element but no path is a "layout route": it adds nothing to the URL,
+      // but draws its element around its children. Here the element is a guard, which shows the
+      // child page (through its <Outlet />) or sends the visitor somewhere else.
+      {
+        // Only for logged-out visitors.
+        element: <GuestOnly />,
+        children: [
+          { path: 'register', element: <RegisterPage /> },
+          { path: 'login', element: <LoginPage /> },
+        ],
+      },
+      {
+        // Only for logged-in customers.
+        element: <RequireAuth />,
+        children: [
+          { path: 'account', element: <AccountPage /> },
+          { path: 'cart', element: <CartPage /> },
+          { path: 'checkout', element: <CheckoutPage /> },
+          { path: 'orders', element: <OrdersPage /> },
+          { path: 'orders/:orderId', element: <OrderDetailPage /> },
+        ],
+      },
       // '*' matches any URL no other route matched. React Router ranks routes by how specific
       // they are, not by their order, so this catch-all never hides a real page.
       { path: '*', element: <NotFoundPage /> },

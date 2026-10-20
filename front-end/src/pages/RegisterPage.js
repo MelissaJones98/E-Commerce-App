@@ -8,11 +8,12 @@
 // React feature). It gives the component a value that survives re-draws, plus a function to
 // change it; changing it makes React re-draw the component with the new value.
 import { useState } from 'react';
-// Link: a link that changes page without reloading. useNavigate: a hook that returns a
-// function for changing page from code (e.g. after a successful registration).
-import { Link, useNavigate } from 'react-router';
+// Link: a link that changes page without reloading.
+import { Link } from 'react-router';
 // register(details): sends the details to the API (see ../api/auth.js).
 import { register } from '../api/auth';
+// useAuth(): the app-wide record of who's logged in (see ../auth/AuthContext.js).
+import { useAuth } from '../auth/AuthContext';
 
 // The form's starting values: every field empty. Each key matches an input's `name`.
 const EMPTY_FORM = {
@@ -33,8 +34,8 @@ export default function RegisterPage() {
   const [error, setError] = useState(null);
   // submitting: true while waiting for the API, so the button can be disabled.
   const [submitting, setSubmitting] = useState(false);
-  // navigate('/some/url') changes page from code.
-  const navigate = useNavigate();
+  // setCustomer(customer) tells the whole app who's now logged in (the nav updates straight away).
+  const { setCustomer } = useAuth();
 
   // Runs on every keystroke in any field. `event.target` is the input that changed.
   function handleChange(event) {
@@ -67,9 +68,10 @@ export default function RegisterPage() {
     try {
       // take confirm_password out of form, then save the rest in a new object called 'details'
       const { confirm_password, ...details } = form;
-      await register(details);
-      // registering also logs the user in, so they go straight to the products page
-      navigate('/');
+      // registering also logs the user in: register() gives back the new customer, so record
+      // them for the whole app. The register page sits inside GuestOnly (../auth/GuestOnly.js),
+      // which then sees someone is logged in and takes them to the products page.
+      setCustomer(await register(details));
     } catch (err) {
       setError(err.message); // show error and stop
       setSubmitting(false); // resets the submit button so the user can try again

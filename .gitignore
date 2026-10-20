@@ -1,2 +1,5 @@
 node_modules/
 .env
+
+# Claude's temporary planning workspace and design mockups (deleted after each ticket)
+.superpowers/

@@ -175,11 +175,36 @@ router.post('/login', (req, res, next) => {
 router.post('/logout', requireAuth, (req, res, next) => {
   // req.logout() (added by Passport) removes the customer from the session.
   // It calls the function we pass once it's finished.
+  // Passport 0.7 also gives the visitor a brand-new, empty session at this
+  // point ("regenerating" it), which deletes the old one from the session
+  // table. So the old cookie can never log anyone in again.
   req.logout((err) => {
     if (err) return next(err);
-    // 204 No Content: success, with nothing to send back.
-    res.sendStatus(204);
+    // The visitor is logged out now, so they don't need the new empty session
+    // either: destroy() deletes it, so nothing is left in the session table
+    // and no new cookie is sent for it.
+    req.session.destroy((err) => {
+      if (err) return next(err);
+      // Tell the browser to delete its session cookie too. It must have the
+      // same name and path the cookie was set with.
+      res.clearCookie('connect.sid', { path: '/' });
+      // 204 No Content: success, with nothing to send back.
+      res.sendStatus(204);
+    });
   });
+});
+
+// ---------------------------------------------------------------------------
+// GET /auth/me: who's logged in?
+// ---------------------------------------------------------------------------
+// The React app asks this when it loads, to decide what the nav shows and
+// which pages to allow. It always replies 200: "nobody" is a normal answer,
+// not an error, so logged-out visitors don't see errors in the browser's
+// console. req.user is the logged-in customer (from deserializeUser in
+// config/passport.js, with only id, names and email), or undefined.
+// `?? null` turns undefined into null, which JSON can represent.
+router.get('/me', (req, res) => {
+  res.json({ customer: req.user ?? null });
 });
 
 // ---------------------------------------------------------------------------

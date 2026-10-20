@@ -71,6 +71,41 @@ export function login({ email, password }) {
   return postJson('/auth/login', { email, password });
 }
 
+// Asks the API who's logged in. Resolves to the customer ({ id, first_name, last_name, email })
+// or null when nobody is. It never throws: if the API can't be reached, it resolves to null, so
+// the app simply treats the visitor as logged out instead of crashing.
+export async function getMe() {
+  try {
+    const response = await fetch('/auth/me');
+    if (!response.ok) return null;
+    const data = await response.json();
+    // `?? null` turns a missing customer into null.
+    return data.customer ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Logs out: asks the API to end the session (it deletes the session and the cookie).
+// Resolves when the customer is logged out on the server. A 401 counts too: it means the
+// server had no session anyway (e.g. it expired), so there's nothing left to end.
+// Throws an Error with a message ready to show if logging out didn't work.
+export async function logout() {
+  const LOGOUT_ERROR = 'Could not log out. Please try again.';
+  let response;
+  try {
+    response = await fetch('/auth/logout', { method: 'POST' });
+  } catch {
+    // No response at all (no connection, server unreachable).
+    throw new Error(LOGOUT_ERROR);
+  }
+  // 204 No Content: logged out. 401 Unauthorized: already logged out.
+  // `||` means "or"; `!(...)` means "not".
+  if (!(response.status === 204 || response.status === 401)) {
+    throw new Error(LOGOUT_ERROR);
+  }
+}
+
 // "No providers switched on": what getProviders() gives when it can't find out.
 // Exported so the login page can start with this same object (see getProviders).
 export const NO_PROVIDERS = { google: false, facebook: false };

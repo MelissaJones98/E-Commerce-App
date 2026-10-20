@@ -14,3 +14,9 @@ import '@testing-library/jest-dom';
 // built-in 'util' module by name.
 import { TextEncoder, TextDecoder } from 'util';
 Object.assign(global, { TextEncoder, TextDecoder });
+
+// renderAt() (test-utils.js) replaces fetch with a fake. Remove it after every test, so one
+// test's fake can never answer another test's requests. `delete` removes a property.
+afterEach(() => {
+  delete global.fetch;
+});

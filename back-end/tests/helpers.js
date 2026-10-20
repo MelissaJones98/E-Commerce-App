@@ -22,8 +22,10 @@ export const resetTables = async () => {
   // TRUNCATE deletes every row from the listed tables, much faster than DELETE.
   //   RESTART IDENTITY  resets the automatic id numbering back to 1
   //   CASCADE           also empties any table that refers to these ones
+  // `session` is listed too (it has no link to customers), so no login from one
+  // test can carry over into the next.
   await pool.query(
-    'TRUNCATE customers, addresses, categories, products, cart_items, orders, order_items RESTART IDENTITY CASCADE'
+    'TRUNCATE customers, addresses, categories, products, cart_items, orders, order_items, session RESTART IDENTITY CASCADE'
   );
 };
 

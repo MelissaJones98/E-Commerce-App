@@ -145,10 +145,10 @@ paths:
           # The session cookie, exactly as POST /auth/login sets it.
           headers:
             Set-Cookie:
-              description: The session cookie, marked HttpOnly so page scripts can't read it.
+              description: The session cookie (7 days, renewed on each request; HttpOnly; SameSite=Lax).
               schema:
                 type: string
-                example: connect.sid=s%3Aabc123; Path=/; HttpOnly
+                example: connect.sid=s%3Aabc123; Path=/; Expires=Tue, 27 Oct 2026 10:00:00 GMT; HttpOnly; SameSite=Lax
           content:
             application/json:
               schema:
@@ -186,10 +186,13 @@ paths:
           description: Logged in. The response sets the session cookie.
           headers:
             Set-Cookie:
-              description: The session cookie, marked HttpOnly so page scripts can't read it.
+              description: |
+                The session cookie. It expires 7 days after your last request (each
+                request renews it), is HttpOnly so page scripts can't read it, and is
+                SameSite=Lax.
               schema:
                 type: string
-                example: connect.sid=s%3Aabc123; Path=/; HttpOnly
+                example: connect.sid=s%3Aabc123; Path=/; Expires=Tue, 27 Oct 2026 10:00:00 GMT; HttpOnly; SameSite=Lax
           content:
             application/json:
               schema:
@@ -209,14 +212,58 @@ paths:
     post:
       tags: [Auth]
       summary: Log out
-      description: Ends the session, so the session cookie no longer logs you in.
+      description: |
+        Ends the session: it's deleted from the server's session store, so the
+        old session cookie can never log anyone in again, and the response tells
+        the browser to delete the cookie.
       security:
         - cookieAuth: []
       responses:
         '204':
           description: Logged out. There is no response body.
+          headers:
+            Set-Cookie:
+              description: Clears the session cookie (an empty value that expired in 1970).
+              schema:
+                type: string
+                example: connect.sid=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Who's logged in
+      description: |
+        Returns the logged-in customer, or `customer: null` when nobody is
+        logged in. It always replies 200 (never 401), so a front end can ask
+        it on every page load without errors. The React app uses it to decide
+        what the nav shows and which pages to allow.
+      responses:
+        '200':
+          description: The logged-in customer, or null.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  customer:
+                    allOf:
+                      - $ref: '#/components/schemas/Customer'
+                    nullable: true
+              examples:
+                loggedIn:
+                  summary: Logged in
+                  value:
+                    customer:
+                      id: 1
+                      first_name: Ada
+                      last_name: Lovelace
+                      email: ada@example.com
+                loggedOut:
+                  summary: Nobody logged in
+                  value:
+                    customer: null
 
   # -------------------------------------------------------------------------
   # Sign in with Google or Facebook
