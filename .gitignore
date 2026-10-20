@@ -3,3 +3,6 @@ node_modules/
 
 # Claude's temporary planning workspace and design mockups (deleted after each ticket)
 .superpowers/
+
+# Claude's handover notes for new sessions (kept locally, not committed)
+HANDOVER.md
