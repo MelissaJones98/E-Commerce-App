@@ -12,7 +12,8 @@ import { getProduct } from '../api/products';
 import { formatPrice } from '../format';
 import AddToCart from '../components/AddToCart';
 
-// The link back to the grid, used on both the product and the "not found" page.
+// The text link back to the grid, used on the "not found" and error pages. (The product page
+// itself has a close (×) link in its card instead.)
 function BackLink() {
   return <Link to="/">← Back to products</Link>;
 }
@@ -76,8 +77,16 @@ export default function ProductDetailPage() {
   // `const { product } = state` takes product out of the state object.
   const { product } = state;
   return (
+    // The product drawn as a card, centred on the page, like the cards on the Products page.
+    // See App.css.
     <section className="product-detail">
-      <BackLink />
+      {/* A close (×) button in the card's top-right corner, going back to Products. It's a
+          link, because it goes to another page. The "×" alone means nothing when read aloud,
+          so aria-label gives it a name for screen readers, and the "×" itself is hidden from
+          them (aria-hidden) so it isn't read as "times" or "multiplication sign". */}
+      <Link to="/" className="product-detail-close" aria-label="Back to products">
+        <span aria-hidden="true">×</span>
+      </Link>
       <h1>{product.name}</h1>
       {/* Only drawn when there is a description, so null never shows as "null". */}
       {product.description && <p>{product.description}</p>}

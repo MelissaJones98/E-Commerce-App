@@ -121,7 +121,8 @@ export default function LoginPage() {
   const enabled = Object.keys(PROVIDER_NAMES).filter((provider) => providers[provider]);
 
   return (
-    <section>
+    // className="auth-page" centres the heading and the form on the page (see App.css).
+    <section className="auth-page">
       <h1>Log in</h1>
 
       <form onSubmit={handleSubmit} className="form">

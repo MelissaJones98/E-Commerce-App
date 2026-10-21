@@ -34,11 +34,16 @@ test('shows the name as the heading, the full description, price and stock', asy
   expect(screen.getByText('42 in stock')).toBeInTheDocument();
 });
 
-test('links back to products', async () => {
+test('a close (×) link in the card goes back to products', async () => {
   renderAt('/products/1', { products: [mug] });
 
   await findHeading('Coffee Mug');
-  expect(screen.getByRole('link', { name: '← Back to products' })).toHaveAttribute('href', '/');
+  // The link shows only "×", so its name for screen readers comes from aria-label.
+  const close = screen.getByRole('link', { name: 'Back to products' });
+  expect(close).toHaveAttribute('href', '/');
+  expect(close).toHaveTextContent('×');
+  // It's inside the product card (the <section>), not above it.
+  expect(close.closest('section')).toContainElement(screen.getByRole('heading', { level: 1 }));
 });
 
 test('a product with no description shows no "null"', async () => {

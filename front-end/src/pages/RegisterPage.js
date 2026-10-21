@@ -83,7 +83,8 @@ export default function RegisterPage() {
   }
 
   return (
-    <section>
+    // className="auth-page" centres the heading and the form on the page (see App.css).
+    <section className="auth-page">
       <h1>Register</h1>
 
       {/* onSubmit={handleSubmit} passes the function itself (no brackets), so React calls it

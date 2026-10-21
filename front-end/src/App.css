@@ -44,17 +44,29 @@ h1 {
   justify-content: space-between;
   align-items: center;
   gap: 1rem; /* space between the site name and the nav (1rem = the root font size, ~16px) */
-  padding: 1rem 1.5rem; /* 1rem top and bottom, 1.5rem left and right */
+  padding: 0.5rem 1.5rem; /* 0.5rem top and bottom (the logo is tall), 1.5rem left and right */
   background: var(--peach);
   border-bottom: 3px solid var(--orange);
 }
 
-/* The site name: bold, brown, and not underlined like a normal link. */
+/* The site name, with the logo beside it: bold, brown, and not underlined like a normal link.
+   display: inline-flex puts the logo and the name side by side, align-items: center lines
+   them up vertically, and gap leaves a little space between them. */
 .site-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
   font-weight: bold;
   font-size: 1.25rem;
   text-decoration: none;
   color: var(--brown);
+}
+
+/* The logo: round, like the circle in the logo itself (border-radius: 50%), which also hides
+   the square image's corners. */
+.site-logo {
+  display: block;
+  border-radius: 50%;
 }
 
 /* The list of nav links: in a row, with the bullet points and default list spacing removed. */
@@ -157,7 +169,30 @@ input:focus-visible {
   outline-offset: 2px;
 }
 
+/* Centred text, e.g. the Products page's heading. */
+.centred {
+  text-align: center;
+}
+
 /* ----- Forms and buttons ----- */
+
+/* The Log in and Register pages: a column as wide as the form (24rem), centred on the page.
+   margin: 0 auto means no space above or below, and "automatic" space left and right; the
+   browser splits the leftover width equally between the two sides, which centres the column.
+   It only works because max-width makes the column narrower than the page. */
+.auth-page {
+  max-width: 24rem;
+  margin: 0 auto;
+}
+
+/* Their headings, and the "Don't have an account? Register" line under the form, are centred
+   too. (Labels and boxes inside the form stay left-aligned, which is easier to read.)
+   ".auth-page > p" means a <p> directly inside .auth-page, not ones nested deeper, so error
+   messages inside the form are left alone. */
+.auth-page h1,
+.auth-page > p {
+  text-align: center;
+}
 
 /* The registration form (and later forms): labels and inputs stacked in one column.
    flex-direction: column stacks children vertically instead of in a row. */
@@ -278,14 +313,19 @@ input:focus-visible {
 .product-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  /* Every row the same height: 1fr shares the height equally between the rows, so each row
+     (and, through height: 100% below, each card) is as tall as the tallest card anywhere in
+     the grid. Without this, a row holding an "Out of stock" label or a two-line name would be
+     taller than the others. */
+  grid-auto-rows: 1fr;
   gap: 1rem;
   list-style: none; /* no bullet points */
   margin: 0;
   padding: 0;
 }
 
-/* One card: a white box with a sage border. height: 100% makes every card in a row as tall
-   as the row. */
+/* One card: a white box with a sage border. height: 100% makes every card as tall as its row
+   (and the grid makes every row the same height), so all the cards are the same size. */
 .product-card {
   height: 100%;
   background: var(--white);
@@ -299,9 +339,12 @@ input:focus-visible {
   border-color: var(--orange);
 }
 
-/* The link that fills the card. display: block makes the whole card area clickable. */
+/* The link that fills the card, so the whole card area is clickable. display: flex with
+   flex-direction: column stacks the name, description, price and "Out of stock" vertically,
+   which lets the price be pushed to the bottom (see .product-price). */
 .product-card-link {
-  display: block;
+  display: flex;
+  flex-direction: column;
   box-sizing: border-box;
   height: 100%;
   padding: 1rem;
@@ -329,6 +372,7 @@ input:focus-visible {
 .product-description {
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2; /* the standard name, for browsers that support it without the prefix */
   -webkit-box-orient: vertical;
   overflow: hidden;
   line-height: 1.4;
@@ -337,16 +381,64 @@ input:focus-visible {
   color: var(--ink);
 }
 
+/* margin-top: auto takes up all the spare space above the price, pushing it (and the "Out of
+   stock" label below it) to the bottom of the card, so prices line up across a row. */
 .product-price {
-  margin: 0;
+  margin: auto 0 0;
   font-weight: bold;
 }
 
 /* ----- A single product's page ----- */
 
-/* Keeps the description at a comfortable reading width. */
+/* The product's page: the product drawn as one big card, centred on the page, with the same
+   white background, sage border and rounded corners as the cards in the grid.
+   max-width keeps the description at a comfortable reading width, and margin: 0 auto centres
+   the card (the browser splits the leftover width equally between left and right).
+   box-sizing: border-box makes max-width include the padding and border.
+   position: relative lets the close (×) link be placed in its corner (see below). */
 .product-detail {
+  position: relative;
+  box-sizing: border-box;
   max-width: 40rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+  background: var(--white);
+  border: 1px solid var(--sage);
+  border-radius: 8px;
+}
+
+/* The product's name: the first thing in the card, so no space above it (the card's padding
+   already gives some), like the name on a grid card. padding-right keeps a long name from
+   running underneath the close (×) link. */
+.product-detail h1 {
+  margin: 0 0 0.5rem;
+  padding-right: 2.5rem;
+}
+
+/* The close (×) link in the card's top-right corner.
+   position: absolute takes it out of the normal flow and places it relative to the card
+   (which is position: relative), 0.5rem in from the top and right edges.
+   width and height make a comfortable 2.25rem square to click or tap, and display: flex with
+   both centring properties puts the × in the middle of it. */
+.product-detail-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%; /* a circle */
+  font-size: 1.75rem;
+  line-height: 1;
+  color: var(--brown);
+  text-decoration: none;
+}
+
+/* Hovering fills the circle with peach, like a hovered grid card. */
+.product-detail-close:hover {
+  background: var(--peach);
 }
 
 .product-detail-price {

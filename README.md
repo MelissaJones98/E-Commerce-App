@@ -63,6 +63,7 @@ e-commerce-app/
 │   ├── db/
 │   │   ├── index.js        # PostgreSQL connection pool and query helper
 │   │   ├── schema.sql      # Creates the database tables (for a new database)
+│   │   ├── seed-products.sql # Optional sample health and beauty products to browse
 │   │   ├── migrations/     # Updates an existing database to match schema.sql
 │   │   │   ├── 001-add-categories.sql
 │   │   │   ├── 002-add-cart-items.sql
@@ -97,6 +98,8 @@ e-commerce-app/
 │   │   ├── App.css         # Styles for the header, nav, page area and forms
 │   │   ├── routes.js       # Route table: which page to show for each URL
 │   │   ├── format.js       # formatPrice(): "8.50" → "£8.50" (tested in format.test.js)
+│   │   ├── assets/
+│   │   │   └── melsy-mart-logo.png # The logo in the header (a 192px copy, small enough to load fast)
 │   │   ├── api/
 │   │   │   ├── request.js  # requestJson(): sends a request; errors carry the HTTP status
 │   │   │   ├── auth.js     # Calls the API's /auth endpoints (register, login, logout, who's logged in, providers)
@@ -165,7 +168,12 @@ createdb -U postgres ecommerce
 psql -U postgres -d ecommerce -f back-end/db/schema.sql
 ```
 
-There are no category routes yet, so add categories in pgAdmin's Query Tool:
+**Sample products (optional):** to see the shop with something in it, run
+`back-end/db/seed-products.sql` the same way. It adds 5 categories and 14 health and beauty
+products, including a sold-out one, one with no description, one with a long description and
+one over £1,000, so you can see how the pages handle each. Running it again adds nothing.
+
+There are no category routes yet, so add your own categories in pgAdmin's Query Tool:
 ```sql
 INSERT INTO categories (name) VALUES ('Kitchen') RETURNING id;
 ```
@@ -286,8 +294,9 @@ the name, the description cut to two lines, and the price (in pounds, e.g. "£8.
 products are labelled "Out of stock". The whole card links to the product's own page. Anyone
 can browse; no login is needed. There are no product images yet (see Future Work).
 
-**A product's page** shows its full description, price and how many are in stock, with a
-**Quantity** box and an **Add to cart** button:
+**A product's page** shows the product as a centred card, like those on the Products page, with
+its full description, price and how many are in stock. A **×** in the card's top-right corner
+goes back to Products. Below them are a **Quantity** box and an **Add to cart** button:
 - **Adding** keeps you on the page, shows "✓ Added 2 to your cart." and updates the cart icon.
 - **The quantity** must be a whole number from 1 to the number in stock; anything else just
   disables the button. If your cart already holds some, the API's message says how many more

@@ -38,7 +38,8 @@ export default function ProductsPage() {
 
   return (
     <section>
-      <h1>Products</h1>
+      {/* className="centred" centres the heading (see App.css). */}
+      <h1 className="centred">Products</h1>
       {/* Exactly one of these four is drawn, depending on the status. */}
       {state.status === 'loading' && <p>Loading…</p>}
       {/* role="alert" makes screen readers announce the error as soon as it appears. */}

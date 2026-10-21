@@ -16,6 +16,10 @@ import { useAuth } from '../auth/AuthContext';
 import CartLink from './CartLink';
 // Importing a CSS file applies its styles; CRA's build tool bundles it into the page.
 import '../App.css';
+// Importing an image gives its URL (e.g. '/static/media/melsy-mart-logo.1a2b3c.png'): the build
+// tool copies the file into the site and adds a fingerprint to its name, so browsers fetch the
+// new version whenever the logo changes. (Only files inside src/ can be imported like this.)
+import logo from '../assets/melsy-mart-logo.png';
 
 // The nav links, stored as data so the JSX below can loop over them instead of repeating
 // <NavLink> for each one. Each object has `to` (the URL) and `label` (the visible text).
@@ -70,6 +74,11 @@ export default function Layout() {
       <header className="site-header">
         {/* The site name is a plain link home, not a heading: each page has its own <h1>. */}
         <Link to="/" className="site-name">
+          {/* The logo, next to the name. alt="" marks it as decorative: the link already says
+              "Melsy Mart" in text, so a screen reader would otherwise read the name twice.
+              width and height (the size it's shown at, in pixels) let the browser reserve
+              its space before it loads, so the header doesn't jump. */}
+          <img src={logo} alt="" className="site-logo" width="96" height="96" />
           Melsy Mart
         </Link>
 
