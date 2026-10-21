@@ -28,13 +28,26 @@ async function findNav() {
 // (see auth/RequireAuth.js), so tests that open them pass { customer: ada } to renderAt.
 const ada = { id: 1, first_name: 'Ada', last_name: 'Lovelace', email: 'ada@example.com' };
 
+// The one product these tests' shop holds: product 42. renderAt answers GET /products/42 with
+// it (and every other product id with a 404).
+const teapot = {
+  id: 42,
+  category_id: null,
+  sku: 'POT-001',
+  name: 'Teapot',
+  description: 'Holds 1 litre',
+  price: '24.00',
+  stock_quantity: 5,
+};
+const products = [teapot];
+
 // Each row is [url, the page's <h1> heading, who's logged in]: one row for every route in
 // routes.js. Log in and Register are only for logged-out visitors, so they're opened logged out
 // (null); every other page is opened logged in. (auth/access.test.js tests the other cases.)
 // `const` declares a variable that can't be reassigned.
 const pages = [
   ['/', 'Products', ada],
-  ['/products/42', 'Product', ada],
+  ['/products/42', 'Teapot', ada], // a product page's heading is the product's name
   ['/register', 'Register', null],
   ['/login', 'Log in', null],
   ['/account', 'Your account', ada],
@@ -49,7 +62,7 @@ const pages = [
 // (url, heading, customer), and `%s` in the test name is replaced by the first two, so each run
 // has its own name.
 test.each(pages)('%s shows the "%s" page', async (url, heading, customer) => {
-  renderAt(url, { customer });
+  renderAt(url, { customer, products });
 
   // findByRole('heading', { level: 1, ... }) waits for an <h1>; `name` is its visible text (exact
   // match). expect(...).toBeInTheDocument() comes from jest-dom (loaded in setupTests.js).
@@ -85,11 +98,11 @@ test('the site name in the header links to the home page', async () => {
 
 // ----- Pages that take an id from the URL -----
 
-test('a product page shows the product id from the URL', async () => {
-  renderAt('/products/42');
+test('a product page shows the product whose id is in the URL', async () => {
+  renderAt('/products/42', { products });
 
   // findByText finds an element by its visible text (exact match by default).
-  expect(await screen.findByText('Product id: 42')).toBeInTheDocument();
+  expect(await screen.findByText('Holds 1 litre')).toBeInTheDocument();
 });
 
 test('an order page shows the order id from the URL', async () => {

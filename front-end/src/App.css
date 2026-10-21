@@ -45,6 +45,40 @@
   text-decoration: underline;
 }
 
+/* The cart icon link. position: relative lets the badge be placed relative to the icon
+   (see .cart-badge). display: inline-flex keeps the icon lined up with the text links. */
+.nav-links a.cart-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* On the cart page itself, the icon can't be underlined like the text links, so the active
+   link gets a line underneath instead (border-bottom). */
+.nav-links a.cart-link.active {
+  border-bottom: 2px solid currentColor;
+}
+
+/* The item count: a small red circle over the top-right corner of the icon.
+   position: absolute takes it out of the normal flow and places it relative to .cart-link;
+   negative top/right push it slightly outside the icon. min-width keeps 1-digit counts round,
+   and border-radius: 999px gives the ends full semicircles however wide it gets. */
+.cart-badge {
+  position: absolute;
+  top: -0.5rem;
+  right: -0.75rem;
+  min-width: 1.1rem;
+  padding: 0 0.3rem;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: #b00020;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: bold;
+  line-height: 1.1rem;
+  text-align: center;
+}
+
 /* "Hi, Ada" in the nav: plain text, slightly muted so it doesn't look like a link. */
 .nav-greeting {
   color: #555;
@@ -226,6 +260,61 @@
 .product-price {
   margin: 0;
   font-weight: bold;
+}
+
+/* ----- A single product's page ----- */
+
+/* Keeps the description at a comfortable reading width. */
+.product-detail {
+  max-width: 40rem;
+}
+
+.product-detail-price {
+  font-size: 1.5rem;
+  font-weight: bold;
+  margin: 0.5rem 0;
+}
+
+/* The quantity label, box and button in one row (wrapping on narrow screens); the message
+   below them takes the full width (flex-basis: 100%). */
+.add-to-cart {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.add-to-cart label {
+  font-weight: bold;
+}
+
+.add-to-cart input {
+  width: 4.5rem;
+  padding: 0.5rem;
+  font: inherit;
+}
+
+.add-to-cart-button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: bold;
+  color: #fff;
+  background: #1a4fa0;
+  border: 1px solid #1a4fa0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* Disabled (sending, an invalid quantity, or sold out): faded, with a "not allowed" cursor. */
+.add-to-cart-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.add-to-cart-message {
+  flex-basis: 100%;
+  margin: 0.25rem 0 0;
 }
 
 /* "Out of stock": small, red and in capitals, so it stands out on the card. */

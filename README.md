@@ -101,7 +101,11 @@ e-commerce-app/
 │   │   │   ├── request.js  # requestJson(): sends a request; errors carry the HTTP status
 │   │   │   ├── auth.js     # Calls the API's /auth endpoints (register, login, logout, who's logged in, providers)
 │   │   │   ├── products.js # Calls GET /products and GET /products/:id
-│   │   │   └── products.test.js # Tests for the products API calls and their errors
+│   │   │   ├── products.test.js # Tests for the products API calls and their errors
+│   │   │   └── cart.js     # Calls GET /cart and POST /cart/items
+│   │   ├── cart/
+│   │   │   ├── CartContext.js # The cart's item count (the nav badge) and addToCart(), shared with every page (useCart())
+│   │   │   └── CartContext.test.js # Tests for loading, updating and clearing the count
 │   │   ├── auth/
 │   │   │   ├── AuthContext.js  # Who's logged in, shared with every page (useAuth())
 │   │   │   ├── RequireAuth.js  # Guard: pages that need you logged in (else go to Log in)
@@ -110,10 +114,15 @@ e-commerce-app/
 │   │   │   └── access.test.js  # Tests for the nav, the guards, and logging in/out in the app
 │   │   ├── components/
 │   │   │   ├── Layout.js   # Header, main nav (changes when you log in) and the page area
+│   │   │   ├── CartLink.js # The cart icon in the nav, with its item-count badge
+│   │   │   ├── CartLink.test.js # Tests for the badge and the icon's screen-reader name
 │   │   │   ├── ProductList.js # The grid of product cards
-│   │   │   └── ProductCard.js # One product: name, 2-line description, price; links to its page
-│   │   ├── pages/          # One component per page (Products, Register and Log in work; the rest are placeholders)
+│   │   │   ├── ProductCard.js # One product: name, 2-line description, price; links to its page
+│   │   │   ├── AddToCart.js # Quantity box and Add to cart button on a product's page
+│   │   │   └── AddToCart.test.js # Tests for adding, its messages, and being logged out
+│   │   ├── pages/          # One component per page (Products, a product, Register and Log in work; the rest are placeholders)
 │   │   │   ├── ProductsPage.test.js # Tests for the Products grid
+│   │   │   ├── ProductDetailPage.test.js # Tests for a product's page: details, not found, errors
 │   │   │   ├── RegisterPage.test.js # Tests for the registration form
 │   │   │   └── LoginPage.test.js    # Tests for the login form, provider links and sign-in errors
 │   │   ├── setupProxy.js   # Dev only: sends Google/Facebook sign-in page visits on to the API
@@ -269,13 +278,32 @@ Stripe payments are added, only that one file should need replacing.
 ### Front end (React)
 The front end is a React app in the `front-end` folder, made with Create React App. It uses
 [React Router](https://reactrouter.com/) (v7) to move between pages without reloading the site.
-The Products, Register and Log in pages are connected to the API; the other pages are still
-placeholders that later tickets will connect.
+The Products, product, Register and Log in pages are connected to the API; the other pages are
+still placeholders that later tickets will connect.
 
 **Products (the home page)** shows every product in the shop as a grid of cards. Each card shows
 the name, the description cut to two lines, and the price (in pounds, e.g. "£8.50"). Sold-out
 products are labelled "Out of stock". The whole card links to the product's own page. Anyone
 can browse; no login is needed. There are no product images yet (see Future Work).
+
+**A product's page** shows its full description, price and how many are in stock, with a
+**Quantity** box and an **Add to cart** button:
+- **Adding** keeps you on the page, shows "✓ Added 2 to your cart." and updates the cart icon.
+- **The quantity** must be a whole number from 1 to the number in stock; anything else just
+  disables the button. If your cart already holds some, the API's message says how many more
+  you can add (e.g. "Not enough stock: 5 available, 3 already in your cart").
+- **Sold out:** a disabled "Out of stock" button instead.
+- **Logged out:** Add to cart takes you to Log in (or on to Register), then back to the product,
+  where you click Add to cart again. If your login has expired without the app knowing, the
+  same happens. While the app is still checking whether you're logged in (a split second on
+  load), the button waits rather than guessing.
+- **Not found:** a retired product, an unknown id or an invalid one (e.g. `/products/abc`)
+  shows "Product not found" with a link back to Products.
+
+**The cart icon** in the nav (logged in only) shows a red badge with the number of items in your
+cart: 2 mugs and 1 teapot count as 3. It's loaded when you log in, updated from the API's reply
+each time you add something, and cleared when you log out. Screen readers hear the link as
+"Cart, 3 items". Clicking it opens the Cart page.
 
 Start the API first (`npm run dev` in the `back-end` folder), then start the front end from the
 `front-end` folder:
@@ -307,7 +335,7 @@ you can delete this line to keep the check on.
 | URL | Page |
 |---|---|
 | `/` | Products (the home page): a grid of every product |
-| `/products/:productId` | A single product |
+| `/products/:productId` | A single product, with Add to cart |
 | `/register` | Register: create an account (signs you in, then goes to Products) |
 | `/login` | Log in: with email and password, or "Sign in with Google / Facebook" (when set up); links to Register |
 | `/account` | Your account (log in needed) |
@@ -323,14 +351,16 @@ the nav only shows what you can use:
 | | Nav shows |
 |---|---|
 | Logged out | Products · Log in · Register |
-| Logged in | Products · Cart · Orders · Account · "Hi, Ada" · **Log out** button |
+| Logged in | Products · cart icon (with its item count) · Orders · Account · "Hi, Ada" · **Log out** button |
 | Still checking (a split second on load) | Products only |
 
 - **Pages that need you logged in** send a logged-out visitor to the Log in page. After logging
   in, you go back to the page you wanted, including any `?query` part. While the app is still
   checking who's logged in, those pages show "Loading…", so a logged-in customer is never sent
   to Log in by mistake.
-- **Log in and Register** send a customer who's already logged in to Products.
+- **Log in and Register** send a customer who's already logged in to Products. Switching
+  between them (the "Register" and "Log in" links on each page) keeps the page you wanted, so
+  registering instead of logging in still takes you back there.
 - **Log out** ends the session on the server, then shows Products with the logged-out nav. If
   the server can't be reached, you stay logged in and see "Could not log out. Please try again."
 
@@ -537,11 +567,23 @@ account, checking out (including a mistyped card and a declined payment) and vie
 orders, against the real running server. After every request it also checks that no response
 contains a password.
 
-The **front end** has 102 tests: the Products page (8: the grid, links, "Out of stock", empty
-and error states), the products API and price formatting (8), the registration form (12), the
-login page and its sign-in errors (14), the login record (8), access control (23: the nav, the
-guards, returning to the page you wanted, logging out) and routing (29: every URL, the nav links,
-"Page not found").
+The **front end** has 147 tests:
+
+| Area | Tests | Covers |
+|---|---|---|
+| Products page | 8 | The grid, links, "Out of stock", empty and error states |
+| Product page | 8 | Details, "Product not found" (including invalid ids), errors, moving between products |
+| Add to cart | 17 | Adding and the badge, invalid quantities, double clicks, not enough stock, errors, logged out, an expired login, waiting while the login is checked |
+| Cart count | 10 | Loading on login, clearing on logout, the server's count after adding, late answers ignored |
+| Cart icon | 8 | The badge, its screen-reader name ("Cart, 1 item"), no icon when logged out |
+| Products API and prices | 8 | Requests, error statuses, "£8.50" |
+| Registration form | 12 | Fields, the exact request, mismatched passwords, errors, double clicks |
+| Login page | 14 | Fields, the exact request, errors, provider links, sign-in error codes |
+| Login record | 8 | Waiting for the API, slow answers, logging out |
+| Access control | 25 | The nav, the guards, returning to the page you wanted (also via Register), logging out |
+| Routing | 29 | Every URL, the nav links, "Page not found" |
+
+The API is replaced by a fake `fetch`, so no server is needed.
 
 ## Future Work
 - Show an image for each product
@@ -553,6 +595,7 @@ guards, returning to the page you wanted, logging out) and routing (29: every UR
 - Add email notification system
   - Set up automated email service on the server to send emails to customers on completion of a purchase.
   - Set up an automated cron job to send email reminders to customers when products have been in their carts for a certain duration of time. 
+  - Back-in-stock alerts: let customers ask to be emailed when a sold-out product returns.
 - Add ability to refund customer orders
   - Set up webhook(s) that interfaces with the payment processor (Stripe) and deals with actions such as refunds.
   - When a refund is processed in Stripe, update order.

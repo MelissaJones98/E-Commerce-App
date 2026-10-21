@@ -6,6 +6,8 @@
 import Layout from './components/Layout';
 // `{ AuthProvider }`: a named import. It shares "who's logged in" with every page.
 import { AuthProvider } from './auth/AuthContext';
+// CartProvider shares the cart's item count (the nav badge) and addToCart() with every page.
+import { CartProvider } from './cart/CartContext';
 // Guards: RequireAuth for pages that need you logged in, GuestOnly for logged-out-only pages.
 import RequireAuth from './auth/RequireAuth';
 import GuestOnly from './auth/GuestOnly';
@@ -27,11 +29,15 @@ export const routes = [
     // Layout's <Outlet /> then shows whichever child below matches the rest of the URL.
     path: '/',
     // `element` is what to draw: the Layout component, inside AuthProvider so the nav and every
-    // page below can find out who's logged in (with useAuth()). It sits inside the router, so
-    // its children can still use React Router's hooks.
+    // page below can find out who's logged in (with useAuth()), and inside CartProvider so they
+    // can use the cart count (with useCart()). CartProvider goes INSIDE AuthProvider because it
+    // needs to know who's logged in. Both sit inside the router, so their children can still use
+    // React Router's hooks.
     element: (
       <AuthProvider>
-        <Layout />
+        <CartProvider>
+          <Layout />
+        </CartProvider>
       </AuthProvider>
     ),
     // Child paths have no leading '/': they're relative to the parent ('cart' means '/cart').

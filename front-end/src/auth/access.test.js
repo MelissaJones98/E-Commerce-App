@@ -17,12 +17,14 @@ function findNav() {
   return screen.findByRole('navigation', { name: 'Main' });
 }
 
-// The visible text of every link in the nav, in order, e.g. ['Products', 'Log in', 'Register'].
-// .map() turns each link element into its text.
+// The name of every link in the nav, in order, e.g. ['Products', 'Log in', 'Register'].
+// .map() turns each link element into its name: its aria-label if it has one (the cart link is
+// an icon, so its name comes from aria-label, e.g. 'Cart'), otherwise its visible text.
+// `??` uses the text when getAttribute returns null (no aria-label).
 function navLinkNames(nav) {
   return within(nav)
     .getAllByRole('link')
-    .map((link) => link.textContent);
+    .map((link) => link.getAttribute('aria-label') ?? link.textContent);
 }
 
 // ----- The nav bar -----
@@ -171,6 +173,65 @@ test('registering shows the logged-in nav on Products', async () => {
   expect(await screen.findByRole('heading', { level: 1, name: 'Products' })).toBeInTheDocument();
   const nav = await findNav();
   expect(await within(nav).findByText('Hi, Ada')).toBeInTheDocument();
+});
+
+// ----- Switching between Log in and Register keeps the page you wanted -----
+
+// Fills in the registration form and submits it.
+async function registerWithForm() {
+  userEvent.type(await screen.findByLabelText('First name'), 'Ada');
+  userEvent.type(screen.getByLabelText('Last name'), 'Lovelace');
+  userEvent.type(screen.getByLabelText('Email'), ada.email);
+  userEvent.type(screen.getByLabelText('Password'), 'correct-horse-battery');
+  userEvent.type(screen.getByLabelText('Confirm password'), 'correct-horse-battery');
+  userEvent.click(screen.getByRole('button', { name: 'Register' }));
+}
+
+// Clicks a link inside the page itself (<main>), not the nav's link with the same name: the
+// logged-out nav also has "Log in" and "Register" links, which don't carry the wanted page.
+async function clickPageLink(name) {
+  userEvent.click(await within(screen.getByRole('main')).findByRole('link', { name }));
+}
+
+test('Add to cart → Log in → Register: registering returns to the product', async () => {
+  fakeApi();
+  const mug = {
+    id: 1,
+    category_id: null,
+    sku: 'MUG-001',
+    name: 'Coffee Mug',
+    description: 'A 350ml ceramic mug',
+    price: '8.50',
+    stock_quantity: 5,
+  };
+  renderAt('/products/1', { products: [mug] });
+
+  // Logged out, so Add to cart goes to Log in. This visitor has no account yet, so they follow
+  // the page's link to Register.
+  userEvent.click(await screen.findByRole('button', { name: 'Add to cart' }));
+  await screen.findByRole('heading', { level: 1, name: 'Log in' });
+  await clickPageLink('Register');
+  await screen.findByRole('heading', { level: 1, name: 'Register' });
+
+  await registerWithForm();
+
+  expect(await screen.findByRole('heading', { level: 1, name: 'Coffee Mug' })).toBeInTheDocument();
+});
+
+test('Cart → Log in → Register → Log in: logging in still returns to Cart', async () => {
+  fakeApi();
+  renderAt('/cart');
+
+  // Changing their mind twice must not lose the note saying they wanted the cart.
+  await screen.findByRole('heading', { level: 1, name: 'Log in' });
+  await clickPageLink('Register');
+  await screen.findByRole('heading', { level: 1, name: 'Register' });
+  await clickPageLink('Log in');
+  await screen.findByRole('heading', { level: 1, name: 'Log in' });
+
+  await logInWithForm();
+
+  expect(await screen.findByRole('heading', { level: 1, name: 'Your cart' })).toBeInTheDocument();
 });
 
 test('Log out from /cart lands on Products with the logged-out nav', async () => {

@@ -9,7 +9,8 @@
 // change it; changing it makes React re-draw the component with the new value.
 import { useState } from 'react';
 // Link: a link that changes page without reloading.
-import { Link } from 'react-router';
+// useLocation: the current address, plus any `state` passed when navigating here.
+import { Link, useLocation } from 'react-router';
 // register(details): sends the details to the API (see ../api/auth.js).
 import { register } from '../api/auth';
 // useAuth(): the app-wide record of who's logged in (see ../auth/AuthContext.js).
@@ -30,6 +31,9 @@ export default function RegisterPage() {
   // pair, and this names the two parts.
   // form: what's typed in each field.
   const [form, setForm] = useState(EMPTY_FORM);
+  // location.state may hold { from: the page they wanted }, passed on from the Log in page.
+  // The Log in link below passes it back, so it isn't lost if they switch again.
+  const location = useLocation();
   // error: the message to show (a string), or null when there's nothing to show.
   const [error, setError] = useState(null);
   // submitting: true while waiting for the API, so the button can be disabled.
@@ -165,10 +169,14 @@ export default function RegisterPage() {
         </button>
       </form>
 
-      {/* For people who already have an account. The space before <Link> is kept because
-          the text and the link are on the same line. */}
+      {/* For people who already have an account. state={location.state} passes the note
+          saying which page they wanted back to Log in. {' '} is a space: JSX drops the line
+          break between the text and the link, so the space has to be written out. */}
       <p>
-        Already have an account? <Link to="/login">Log in</Link>
+        Already have an account?{' '}
+        <Link to="/login" state={location.state}>
+          Log in
+        </Link>
       </p>
     </section>
   );

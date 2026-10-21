@@ -10,7 +10,8 @@
 import { useEffect, useState } from 'react';
 // Link: a link that changes page without reloading.
 // useSearchParams: reads the ?name=value part of the address, e.g. ?error=cancelled.
-import { Link, useSearchParams } from 'react-router';
+// useLocation: the current address, plus any `state` passed when navigating here.
+import { Link, useLocation, useSearchParams } from 'react-router';
 // getProviders(): which "Sign in with..." providers are on. login(): sends the email and
 // password to the API (see ../api/auth.js). NO_PROVIDERS: "none are on".
 import { getProviders, login, NO_PROVIDERS } from '../api/auth';
@@ -55,6 +56,9 @@ export default function LoginPage() {
   // searchParams.get('error') reads ?error=... from the address (null if it isn't there).
   // The `[searchParams]` destructuring ignores the hook's second value (a setter we don't need).
   const [searchParams] = useSearchParams();
+  // location.state may hold { from: the page they wanted } (from RequireAuth or Add to cart).
+  // The Register link below passes it on, so it isn't lost if they register instead.
+  const location = useLocation();
 
   // form: what's typed in each field. Its keys match the API's login fields exactly.
   const [form, setForm] = useState({ email: '', password: '' });
@@ -176,9 +180,14 @@ export default function LoginPage() {
         </>
       )}
 
-      {/* For people who don't have an account yet. */}
+      {/* For people who don't have an account yet. state={location.state} passes the note
+          saying which page they wanted on to Register, so registering takes them there too.
+          (A <Link> without `state` starts with none, which would lose it.) */}
       <p>
-        Don't have an account? <Link to="/register">Register</Link>
+        Don't have an account?{' '}
+        <Link to="/register" state={location.state}>
+          Register
+        </Link>
       </p>
     </section>
   );
