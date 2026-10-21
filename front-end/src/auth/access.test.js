@@ -70,7 +70,7 @@ test('says "Hi there" when the customer has no first name', async () => {
 // Each row is [url, the page's <h1> heading].
 const protectedPages = [
   ['/account', 'Your account'],
-  ['/cart', 'Your cart'],
+  ['/cart', 'Your Cart'],
   ['/checkout', 'Checkout'],
   ['/orders', 'Your orders'],
   ['/orders/7', 'Order'],
@@ -231,7 +231,7 @@ test('Cart → Log in → Register → Log in: logging in still returns to Cart'
 
   await logInWithForm();
 
-  expect(await screen.findByRole('heading', { level: 1, name: 'Your cart' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { level: 1, name: 'Your Cart' })).toBeInTheDocument();
 });
 
 test('Log out from /cart lands on Products with the logged-out nav', async () => {

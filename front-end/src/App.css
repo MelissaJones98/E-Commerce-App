@@ -492,6 +492,149 @@ input:focus-visible {
   color: var(--sage-dark);
 }
 
+/* ----- The Cart page ----- */
+
+/* The cart: one card, centred, styled like the product page's card. */
+.cart {
+  box-sizing: border-box;
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+  background: var(--white);
+  border: 1px solid var(--sage);
+  border-radius: 8px;
+}
+
+/* The list of rows: no bullet points or default list spacing. */
+.cart-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* One row, as a grid of four columns: the name (taking the spare width, 1fr), then the
+   quantity, the row price and the × (each as wide as its content, auto). A line between rows. */
+.cart-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--peach);
+}
+
+/* The name, with "£2.00 each" on the line underneath (flex-direction: column stacks them). */
+.cart-item-name {
+  display: flex;
+  flex-direction: column;
+}
+
+.cart-item-name strong {
+  color: var(--brown);
+}
+
+.cart-item-each {
+  font-size: 0.9rem;
+  color: var(--sage-dark);
+}
+
+/* − quantity +, in a row. min-width keeps the number from making the row jump as it changes
+   from one digit to two. */
+.cart-quantity {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cart-quantity span {
+  min-width: 1.5rem;
+  text-align: center;
+  font-weight: bold;
+}
+
+/* The row's price, right-aligned so the prices line up down the card. */
+.cart-item-total {
+  min-width: 4.5rem;
+  text-align: right;
+  font-weight: bold;
+}
+
+/* A message under a row: grid-column: 1 / -1 makes it span every column (from the first
+   column line, 1, to the last, -1), so it sits on its own line under the row. */
+.cart-item-message {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.cart-item-message[role='status'] {
+  color: var(--sage-dark);
+}
+
+/* The small round −, + and × buttons: brown outlines, filling with peach on hover (like the
+   product page's ×). */
+.round-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  font: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--brown);
+  background: var(--white);
+  border: 1px solid var(--sage);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.round-button:hover:not(:disabled) {
+  background: var(--peach);
+  border-color: var(--orange);
+}
+
+/* Disabled (− at 1, or while a change is saving): faded, with a "not allowed" cursor. */
+.round-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* "Subtotal (4 items)  £11.00", on the right (justify-content: flex-end pushes it there). */
+.cart-subtotal {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1.5rem;
+  margin: 1rem 0 0;
+  font-size: 1.1rem;
+}
+
+/* "Proceed to checkout", also on the right. */
+.cart-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+/* A link that looks like the main brown buttons (Proceed to checkout). It's a link, not a
+   button, because it goes to another page. */
+.button-link {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  font-weight: bold;
+  color: var(--white);
+  background: var(--brown);
+  border: 1px solid var(--brown);
+  border-radius: 6px;
+  text-decoration: none;
+}
+
+.button-link:hover {
+  color: var(--brown);
+  background: var(--peach);
+  border-color: var(--orange);
+}
+
 /* "Out of stock": small, warm red and in capitals, so it stands out on the card. */
 .out-of-stock {
   margin: 0.5rem 0 0;

@@ -49,20 +49,28 @@ function deferred() {
 }
 
 // What the fake fetch answers. Each test sets these before drawing the probe.
+// cartResponse answers GET /cart. It may be a function, called on every request, so a test
+// can give a different answer the second time (e.g. after removing an item).
 let meResponse;
 let cartResponse;
 let addResponse;
+let putResponse;
+let deleteResponse;
 
 beforeEach(() => {
   meResponse = Promise.resolve(jsonResponse(200, { customer: ada }));
   cartResponse = Promise.resolve(jsonResponse(200, cartWith()));
   addResponse = Promise.resolve(jsonResponse(201, cartWith()));
-  // Answer each request by its address (and method, for the cart's two kinds of request).
+  putResponse = Promise.resolve(jsonResponse(200, cartWith()));
+  deleteResponse = Promise.resolve({ ok: true, status: 204, json: async () => undefined });
+  // Answer each request by its address and method.
   global.fetch = jest.fn((url, options) => {
     if (url === '/auth/me') return meResponse;
     if (url === '/auth/logout') return Promise.resolve({ ok: true, status: 204 });
     if (url === '/cart/items' && options?.method === 'POST') return addResponse;
-    if (url === '/cart') return cartResponse;
+    if (url === '/cart/items/1' && options?.method === 'PUT') return putResponse;
+    if (url === '/cart/items/1' && options?.method === 'DELETE') return deleteResponse;
+    if (url === '/cart') return typeof cartResponse === 'function' ? cartResponse() : cartResponse;
     return Promise.reject(new TypeError('Failed to fetch'));
   });
 });
@@ -76,27 +84,35 @@ function cartRequests() {
   return global.fetch.mock.calls.filter(([url]) => url === '/cart').length;
 }
 
-// The probe: shows the count ("none" for null), and buttons to add 2 of product 1 and log out.
+// The probe: shows the count and the cart's total ("none" for null), and buttons that call each
+// of useCart()'s functions with product 1: add 2, set the quantity to 3, remove, and refresh.
 function Probe() {
-  const { itemCount, addToCart } = useCart();
+  const { cart, itemCount, addToCart, updateQuantity, removeItem, refresh } = useCart();
   const { logout } = useAuth();
-  const [addError, setAddError] = useState(null);
+  const [error, setError] = useState(null);
 
-  async function handleAdd() {
+  // Runs one of the cart functions, and keeps any error it throws so the test can check it.
+  // `action` is a function, e.g. () => addToCart(1, 2).
+  async function run(action) {
     try {
-      await addToCart(1, 2);
+      await action();
     } catch (err) {
-      setAddError(`${err.status} ${err.message}`);
+      setError(`${err.status} ${err.message}`);
     }
   }
 
   return (
     <div>
-      {/* `??` shows "none" when itemCount is null (or undefined). */}
+      {/* `??` shows "none" when the value is null (or undefined). `cart?.total` reads total
+          only if there is a cart. */}
       <p>count: {itemCount ?? 'none'}</p>
-      <button onClick={handleAdd}>add</button>
+      <p>total: {cart?.total ?? 'none'}</p>
+      <button onClick={() => run(() => addToCart(1, 2))}>add</button>
+      <button onClick={() => run(() => updateQuantity(1, 3))}>update</button>
+      <button onClick={() => run(() => removeItem(1))}>remove</button>
+      <button onClick={() => run(refresh)}>refresh</button>
       <button onClick={logout}>log out</button>
-      {addError && <p>error: {addError}</p>}
+      {error && <p>error: {error}</p>}
     </div>
   );
 }
@@ -238,4 +254,104 @@ test('a slow first load does not overwrite a newer add', async () => {
   await settle();
 
   expect(screen.getByText('count: 4')).toBeInTheDocument();
+});
+
+// ----- The whole cart: changing, removing and reloading it -----
+
+test("updateQuantity stores the cart from the server's reply", async () => {
+  cartResponse = Promise.resolve(jsonResponse(200, cartWith(1)));
+  // The server's cart after the change: quantities 3 and 1, total '4.00'.
+  putResponse = Promise.resolve(jsonResponse(200, { ...cartWith(3, 1), total: '4.00' }));
+  renderProbe();
+  await screen.findByText('count: 1');
+
+  userEvent.click(screen.getByRole('button', { name: 'update' }));
+
+  expect(await screen.findByText('count: 4')).toBeInTheDocument();
+  expect(screen.getByText('total: 4.00')).toBeInTheDocument();
+  // It sent PUT /cart/items/1 with the new quantity.
+  const [, options] = global.fetch.mock.calls.find(([url]) => url === '/cart/items/1');
+  expect(JSON.parse(options.body)).toEqual({ quantity: 3 });
+});
+
+test('removeItem deletes, then reloads the cart', async () => {
+  // GET /cart answers with two items at first, then (after the removal) one.
+  let cartLoads = 0;
+  cartResponse = () => {
+    cartLoads += 1;
+    return Promise.resolve(jsonResponse(200, cartLoads === 1 ? cartWith(2, 1) : cartWith(1)));
+  };
+  renderProbe();
+  await screen.findByText('count: 3');
+
+  userEvent.click(screen.getByRole('button', { name: 'remove' }));
+
+  expect(await screen.findByText('count: 1')).toBeInTheDocument();
+  // The DELETE came before the reload. .map(...) lists each call as "METHOD url".
+  const calls = global.fetch.mock.calls.map(([url, options]) => `${options?.method ?? 'GET'} ${url}`);
+  // .indexOf finds a call's position in the list; .lastIndexOf finds the LAST matching call.
+  expect(calls.indexOf('DELETE /cart/items/1')).toBeLessThan(calls.lastIndexOf('GET /cart'));
+});
+
+test('refresh reloads the cart', async () => {
+  let cartLoads = 0;
+  cartResponse = () => {
+    cartLoads += 1;
+    return Promise.resolve(jsonResponse(200, cartLoads === 1 ? cartWith(1) : cartWith(5)));
+  };
+  renderProbe();
+  await screen.findByText('count: 1');
+
+  userEvent.click(screen.getByRole('button', { name: 'refresh' }));
+
+  expect(await screen.findByText('count: 5')).toBeInTheDocument();
+});
+
+test('refresh rethrows a load failure and leaves the cart null', async () => {
+  let cartLoads = 0;
+  cartResponse = () => {
+    cartLoads += 1;
+    return cartLoads === 1
+      ? Promise.resolve(jsonResponse(200, cartWith(2)))
+      : Promise.resolve(jsonResponse(500, { error: 'Internal server error' }));
+  };
+  renderProbe();
+  await screen.findByText('count: 2');
+
+  userEvent.click(screen.getByRole('button', { name: 'refresh' }));
+
+  expect(await screen.findByText('error: 500 Internal server error')).toBeInTheDocument();
+  expect(screen.getByText('count: none')).toBeInTheDocument();
+  expect(screen.getByText('total: none')).toBeInTheDocument();
+});
+
+test('updateQuantity rethrows the error and leaves the cart unchanged', async () => {
+  cartResponse = Promise.resolve(jsonResponse(200, cartWith(6)));
+  putResponse = Promise.resolve(jsonResponse(409, { error: 'Not enough stock: 3 available' }));
+  renderProbe();
+  await screen.findByText('count: 6');
+
+  userEvent.click(screen.getByRole('button', { name: 'update' }));
+
+  expect(await screen.findByText('error: 409 Not enough stock: 3 available')).toBeInTheDocument();
+  expect(screen.getByText('count: 6')).toBeInTheDocument();
+});
+
+test('ignores a change reply that arrives after logout', async () => {
+  cartResponse = Promise.resolve(jsonResponse(200, cartWith(1)));
+  const slowPut = deferred();
+  putResponse = slowPut.promise;
+  renderProbe();
+  await screen.findByText('count: 1');
+
+  // Start the change, then log out before it's answered.
+  userEvent.click(screen.getByRole('button', { name: 'update' }));
+  userEvent.click(screen.getByRole('button', { name: 'log out' }));
+  expect(await screen.findByText('count: none')).toBeInTheDocument();
+
+  // The change's reply arrives late: it belongs to the customer who has logged out.
+  slowPut.resolve(jsonResponse(200, cartWith(3)));
+  await settle();
+
+  expect(screen.getByText('count: none')).toBeInTheDocument();
 });

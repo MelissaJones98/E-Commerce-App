@@ -105,10 +105,13 @@ e-commerce-app/
 │   │   │   ├── auth.js     # Calls the API's /auth endpoints (register, login, logout, who's logged in, providers)
 │   │   │   ├── products.js # Calls GET /products and GET /products/:id
 │   │   │   ├── products.test.js # Tests for the products API calls and their errors
-│   │   │   └── cart.js     # Calls GET /cart and POST /cart/items
+│   │   │   ├── cart.js     # Calls GET /cart, POST /cart/items, PUT and DELETE /cart/items/:id
+│   │   │   └── cart.test.js # Tests for changing and removing cart items
 │   │   ├── cart/
-│   │   │   ├── CartContext.js # The cart's item count (the nav badge) and addToCart(), shared with every page (useCart())
-│   │   │   └── CartContext.test.js # Tests for loading, updating and clearing the count
+│   │   │   ├── CartContext.js # The whole cart, shared with every page (useCart()): the badge's count, adding, changing, removing, reloading
+│   │   │   ├── CartContext.test.js # Tests for loading, changing and clearing the cart, and ignoring late answers
+│   │   │   ├── stock.js    # stockAdjustment(): what to do when there isn't enough stock (a 409)
+│   │   │   └── stock.test.js # Tests for its four cases
 │   │   ├── auth/
 │   │   │   ├── AuthContext.js  # Who's logged in, shared with every page (useAuth())
 │   │   │   ├── RequireAuth.js  # Guard: pages that need you logged in (else go to Log in)
@@ -123,9 +126,10 @@ e-commerce-app/
 │   │   │   ├── ProductCard.js # One product: name, 2-line description, price; links to its page
 │   │   │   ├── AddToCart.js # Quantity box and Add to cart button on a product's page
 │   │   │   └── AddToCart.test.js # Tests for adding, its messages, and being logged out
-│   │   ├── pages/          # One component per page (Products, a product, Register and Log in work; the rest are placeholders)
+│   │   ├── pages/          # One component per page (Products, a product, Cart, Register and Log in work; the rest are placeholders)
 │   │   │   ├── ProductsPage.test.js # Tests for the Products grid
 │   │   │   ├── ProductDetailPage.test.js # Tests for a product's page: details, not found, errors
+│   │   │   ├── CartPage.test.js # Tests for the cart: rows, subtotal, − / + / ×, stock, errors
 │   │   │   ├── RegisterPage.test.js # Tests for the registration form
 │   │   │   └── LoginPage.test.js    # Tests for the login form, provider links and sign-in errors
 │   │   ├── setupProxy.js   # Dev only: sends Google/Facebook sign-in page visits on to the API
@@ -286,8 +290,8 @@ Stripe payments are added, only that one file should need replacing.
 ### Front end (React)
 The front end is a React app in the `front-end` folder, made with Create React App. It uses
 [React Router](https://reactrouter.com/) (v7) to move between pages without reloading the site.
-The Products, product, Register and Log in pages are connected to the API; the other pages are
-still placeholders that later tickets will connect.
+The Products, product, Cart, Register and Log in pages are connected to the API; the other pages
+are still placeholders that later tickets will connect.
 
 **Products (the home page)** shows every product in the shop as a grid of cards. Each card shows
 the name, the description cut to two lines, and the price (in pounds, e.g. "£8.50"). Sold-out
@@ -309,10 +313,28 @@ goes back to Products. Below them are a **Quantity** box and an **Add to cart** 
 - **Not found:** a retired product, an unknown id or an invalid one (e.g. `/products/abc`)
   shows "Product not found" with a link back to Products.
 
-**The cart icon** in the nav (logged in only) shows a red badge with the number of items in your
+**The cart icon** in the nav (logged in only) shows a badge with the number of items in your
 cart: 2 mugs and 1 teapot count as 3. It's loaded when you log in, updated from the API's reply
-each time you add something, and cleared when you log out. Screen readers hear the link as
+each time the cart changes, and cleared when you log out. Screen readers hear the link as
 "Cart, 3 items". Clicking it opens the Cart page.
+
+**Your Cart** (`/cart`) shows the cart as one card, with a row for each product: its name and
+unit price ("£2.00 each"), its quantity with **−** and **+** buttons, its row price (unit price ×
+quantity), and a **×** to remove it. Below the rows are the subtotal and **Proceed to checkout**.
+For example, 3 moisturisers at £2 and 1 liquid blush at £5 show row prices of £6.00 and £5.00,
+and "Subtotal (4 items) £11.00". Every price and total comes from the API, which works them out
+exactly; the page only formats them.
+- **Changes save straight away,** and the rows, subtotal and badge update from the API's reply.
+  While one is saving, every button is briefly disabled, so changes never overlap.
+- **−** stops at 1. To remove a product, use its **×**.
+- **Not enough stock:** if the stock has dropped below what's in your cart, the quantity jumps
+  down to what's available, with "Only 3 in stock, so your quantity is now 3." Pressing **+** past
+  the stock says "Only 3 in stock.", and a product that has sold out since you added it asks you
+  to remove it.
+- **An empty cart** says "Your cart is empty." with a link back to Products, and has no checkout
+  button. Proceed to checkout goes to the Checkout page, which is still a placeholder.
+- **An expired login** goes to Log in and back, as on a product's page. A product removed in
+  another tab simply disappears when you next change the cart.
 
 Start the API first (`npm run dev` in the `back-end` folder), then start the front end from the
 `front-end` folder:
@@ -348,7 +370,7 @@ you can delete this line to keep the check on.
 | `/register` | Register: create an account (signs you in, then goes to Products) |
 | `/login` | Log in: with email and password, or "Sign in with Google / Facebook" (when set up); links to Register |
 | `/account` | Your account (log in needed) |
-| `/cart` | Your cart, linking to checkout (log in needed) |
+| `/cart` | Your Cart: change quantities, remove items, see the subtotal, then checkout (log in needed) |
 | `/checkout` | Checkout (log in needed) |
 | `/orders` | Your orders (log in needed) |
 | `/orders/:orderId` | A single order (log in needed) |
@@ -576,14 +598,17 @@ account, checking out (including a mistyped card and a declined payment) and vie
 orders, against the real running server. After every request it also checks that no response
 contains a password.
 
-The **front end** has 147 tests:
+The **front end** has 182 tests:
 
 | Area | Tests | Covers |
 |---|---|---|
 | Products page | 8 | The grid, links, "Out of stock", empty and error states |
 | Product page | 8 | Details, "Product not found" (including invalid ids), errors, moving between products |
 | Add to cart | 17 | Adding and the badge, invalid quantities, double clicks, not enough stock, errors, logged out, an expired login, waiting while the login is checked |
-| Cart count | 10 | Loading on login, clearing on logout, the server's count after adding, late answers ignored |
+| Cart page | 22 | Row prices and the subtotal (the £6 + £5 = £11 example), − / + / ×, − stopping at 1, one change at a time, empty cart, errors (without losing the cart on screen), stock running short, an expired login |
+| Stock rule | 4 | Jumping down to what's available, "Only N in stock.", sold out, an unexpected message |
+| Cart context | 16 | Loading on login, clearing on logout, the server's cart after adding, changing and removing, late answers ignored |
+| Cart API | 3 | Changing and removing items, error statuses |
 | Cart icon | 8 | The badge, its screen-reader name ("Cart, 1 item"), no icon when logged out |
 | Products API and prices | 8 | Requests, error statuses, "£8.50" |
 | Registration form | 12 | Fields, the exact request, mismatched passwords, errors, double clicks |

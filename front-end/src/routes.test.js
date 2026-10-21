@@ -51,7 +51,7 @@ const pages = [
   ['/register', 'Register', null],
   ['/login', 'Log in', null],
   ['/account', 'Your account', ada],
-  ['/cart', 'Your cart', ada],
+  ['/cart', 'Your Cart', ada],
   ['/checkout', 'Checkout', ada],
   ['/orders', 'Your orders', ada],
   ['/orders/7', 'Order', ada],
@@ -118,7 +118,7 @@ test('an order page shows the order id from the URL', async () => {
 // logged out.
 const navTargets = [
   ['Products', 'Products', ada],
-  ['Cart', 'Your cart', ada],
+  ['Cart', 'Your Cart', ada],
   ['Orders', 'Your orders', ada],
   ['Account', 'Your account', ada],
   ['Log in', 'Log in', null],
@@ -166,9 +166,14 @@ test('the Products nav link is marked active on the home page', async () => {
 // ----- Links between pages -----
 
 test('the cart page links to checkout', async () => {
-  renderAt('/cart', { customer: ada });
+  // The checkout link only appears when the cart has something in it.
+  const cart = {
+    items: [{ product_id: 42, sku: 'POT-001', name: 'Teapot', price: '24.00', quantity: 1, line_total: '24.00' }],
+    total: '24.00',
+  };
+  renderAt('/cart', { customer: ada, cart });
 
-  userEvent.click(await screen.findByRole('link', { name: 'Go to checkout' }));
+  userEvent.click(await screen.findByRole('link', { name: 'Proceed to checkout' }));
 
   expect(await screen.findByRole('heading', { level: 1, name: 'Checkout' })).toBeInTheDocument();
 });
@@ -178,7 +183,7 @@ test('the cart page links to checkout', async () => {
 test('a URL with a trailing slash still finds its page', async () => {
   renderAt('/cart/', { customer: ada });
 
-  expect(await screen.findByRole('heading', { level: 1, name: 'Your cart' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { level: 1, name: 'Your Cart' })).toBeInTheDocument();
 });
 
 test('a query string does not stop the home page from showing', async () => {
@@ -214,5 +219,5 @@ test('going back in history returns to the previous page', async () => {
     await router.navigate(-1);
   });
 
-  expect(await screen.findByRole('heading', { level: 1, name: 'Your cart' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { level: 1, name: 'Your Cart' })).toBeInTheDocument();
 });

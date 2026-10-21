@@ -75,7 +75,9 @@ function meReply(customer) {
 //   products  the shop's products, answering GET /products and GET /products/:id
 //             (default: none, []), or REQUEST_FAILS / REQUEST_PENDING
 //   cart      the reply to GET /cart, e.g. { items: [{ product_id: 1, quantity: 2 }], total }
-//             (default: an empty cart), or REQUEST_FAILS / REQUEST_PENDING
+//             (default: an empty cart), or REQUEST_FAILS / REQUEST_PENDING. It can also be a
+//             FUNCTION returning one of those: renderAt calls it on every GET /cart, so a test
+//             can change what the "server" holds between requests (e.g. after removing an item)
 // The app makes those requests by itself (when it starts, or when a page opens), so this
 // answers them. Every other request (e.g. POST /auth/login, POST /cart/items) is passed on to
 // the test's own fake fetch, if it set one up before calling renderAt. jest.fn() records every
@@ -100,7 +102,10 @@ export function renderAt(url, { customer = null, products = [], cart = EMPTY_CAR
       // decodeURIComponent undoes the page's encodeURIComponent, giving back the typed id.
       reply = replyFor(products, () => productReply(products, decodeURIComponent(productMatch[1])));
     } else if (isGet && requestUrl === '/cart') {
-      reply = replyFor(cart, () => jsonReply(200, cart));
+      // `typeof cart === 'function'` checks whether the option is a function; if so, call it
+      // now to get the cart the "server" currently holds.
+      const current = typeof cart === 'function' ? cart() : cart;
+      reply = replyFor(current, () => jsonReply(200, current));
     }
 
     if (reply) {

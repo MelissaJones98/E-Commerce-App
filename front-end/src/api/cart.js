@@ -24,3 +24,20 @@ export function addCartItem(productId, quantity) {
     body: JSON.stringify({ product_id: productId, quantity }),
   });
 }
+
+// Sets how many of a product are in the cart. Unlike addCartItem, this REPLACES the quantity
+// (3 means "make it 3", not "add 3"). Resolves to the whole updated cart.
+// A 409 means there isn't enough stock; its message reads "Not enough stock: N available".
+export function setCartQuantity(productId, quantity) {
+  return requestJson(`/cart/items/${productId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ quantity }),
+  });
+}
+
+// Removes a product from the cart completely. The API replies 204 No Content (no body), so
+// this resolves to null; ask getCart() for the updated cart.
+export function removeCartItem(productId) {
+  return requestJson(`/cart/items/${productId}`, { method: 'DELETE' });
+}

@@ -71,7 +71,7 @@ test('the cart link opens the cart page', async () => {
 
   userEvent.click(await within(nav).findByRole('link', { name: 'Cart, 3 items' }));
 
-  expect(await screen.findByRole('heading', { level: 1, name: 'Your cart' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { level: 1, name: 'Your Cart' })).toBeInTheDocument();
 });
 
 test('logged out, there is no cart link', async () => {
