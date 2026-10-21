@@ -91,7 +91,7 @@ test('the site name in the header links to the home page', async () => {
   // Start somewhere other than home, so reaching Products proves the link worked.
   renderAt('/no-such-page');
 
-  userEvent.click(await screen.findByRole('link', { name: 'E-Commerce App' }));
+  userEvent.click(await screen.findByRole('link', { name: 'Melsy Mart' }));
 
   expect(await screen.findByRole('heading', { level: 1, name: 'Products' })).toBeInTheDocument();
 });

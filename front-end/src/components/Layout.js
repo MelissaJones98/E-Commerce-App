@@ -70,7 +70,7 @@ export default function Layout() {
       <header className="site-header">
         {/* The site name is a plain link home, not a heading: each page has its own <h1>. */}
         <Link to="/" className="site-name">
-          E-Commerce App
+          Melsy Mart
         </Link>
 
         {/* aria-label names this nav for screen readers (and for the tests: name 'Main'). */}

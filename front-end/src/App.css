@@ -1,5 +1,39 @@
-/* Styles for the Layout component: the header, the main nav and the page area.
-   (CSS comments use slash-star ... star-slash.) */
+/* The app's styles: the colour scheme, the header and nav, the page area, forms, and the
+   product pages. (CSS comments use slash-star ... star-slash.) */
+
+/* ----- The colour scheme ----- */
+
+/* :root is the whole page (the <html> element). Properties starting with -- are "custom
+   properties" (CSS variables): named values that any rule below can use with var(--name).
+   Changing a colour here changes it everywhere it's used. */
+:root {
+  /* The four colours of the Melsy Mart palette. */
+  --peach: #ffd5af; /* the header */
+  --orange: #e59a59; /* accents: the header's underline, hover borders */
+  --sage: #888870; /* borders around cards and form boxes */
+  --brown: #712e1e; /* headings, links and buttons */
+
+  /* Working shades. Orange and sage are too pale for small text to be readable on light
+     backgrounds, so text uses these darker or lighter companions instead. */
+  --cream: #fff7ef; /* the page background: a paler peach */
+  --ink: #3b1f17; /* body text: a near-black brown */
+  --sage-dark: #4f5a3a; /* "sage" text, dark enough to read */
+  --error: #9e2a1c; /* error messages and "Out of stock": a warm red */
+  --white: #ffffff; /* cards, form boxes and button text */
+}
+
+/* The whole page: cream background and ink text. (The font itself is set in index.css.) */
+body {
+  background: var(--cream);
+  color: var(--ink);
+}
+
+/* Every page's main heading in brown. */
+h1 {
+  color: var(--brown);
+}
+
+/* ----- The header and nav ----- */
 
 /* The header: the site name on the left, nav links on the right, in one row.
    display: flex lines its children up in a row; justify-content spaces them out;
@@ -11,15 +45,16 @@
   align-items: center;
   gap: 1rem; /* space between the site name and the nav (1rem = the root font size, ~16px) */
   padding: 1rem 1.5rem; /* 1rem top and bottom, 1.5rem left and right */
-  border-bottom: 1px solid #ddd;
+  background: var(--peach);
+  border-bottom: 3px solid var(--orange);
 }
 
-/* The site name: bold, and not underlined like a normal link. */
+/* The site name: bold, brown, and not underlined like a normal link. */
 .site-name {
   font-weight: bold;
   font-size: 1.25rem;
   text-decoration: none;
-  color: inherit; /* use the surrounding text colour instead of link blue */
+  color: var(--brown);
 }
 
 /* The list of nav links: in a row, with the bullet points and default list spacing removed. */
@@ -35,7 +70,12 @@
 /* Every nav link. ".nav-links a" means "any <a> inside .nav-links" (NavLink draws an <a>). */
 .nav-links a {
   text-decoration: none;
-  color: #1a4fa0;
+  color: var(--brown);
+}
+
+/* Underline on hover, so it's clear the links can be clicked. */
+.nav-links a:hover {
+  text-decoration: underline;
 }
 
 /* The link to the current page. NavLink adds class="active" to it automatically.
@@ -59,7 +99,7 @@
   border-bottom: 2px solid currentColor;
 }
 
-/* The item count: a small red circle over the top-right corner of the icon.
+/* The item count: a small brown circle over the top-right corner of the icon.
    position: absolute takes it out of the normal flow and places it relative to .cart-link;
    negative top/right push it slightly outside the icon. min-width keeps 1-digit counts round,
    and border-radius: 999px gives the ends full semicircles however wide it gets. */
@@ -71,17 +111,17 @@
   padding: 0 0.3rem;
   box-sizing: border-box;
   border-radius: 999px;
-  background: #b00020;
-  color: #fff;
+  background: var(--brown);
+  color: var(--white);
   font-size: 0.75rem;
   font-weight: bold;
   line-height: 1.1rem;
   text-align: center;
 }
 
-/* "Hi, Ada" in the nav: plain text, slightly muted so it doesn't look like a link. */
+/* "Hi, Ada" in the nav: plain text in dark sage, so it doesn't look like a link. */
 .nav-greeting {
-  color: #555;
+  color: var(--sage-dark);
 }
 
 /* The Log out button, styled to look like the nav links next to it. A <button> has its own
@@ -91,7 +131,7 @@
   background: none;
   padding: 0;
   font: inherit; /* the page's font and size, like the links */
-  color: #1a4fa0; /* the same blue as .nav-links a */
+  color: var(--brown); /* the same brown as .nav-links a */
   cursor: pointer; /* the pointing-hand cursor, like a link */
 }
 
@@ -105,6 +145,19 @@
 .page {
   padding: 1.5rem;
 }
+
+/* A clear brown outline on anything reached with the keyboard (Tab), so keyboard users can see
+   where they are. :focus-visible only applies to keyboard focus, not mouse clicks. Brown shows
+   up on both the cream page and the peach header. A comma between selectors means "any of
+   these". */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  outline: 3px solid var(--brown);
+  outline-offset: 2px;
+}
+
+/* ----- Forms and buttons ----- */
 
 /* The registration form (and later forms): labels and inputs stacked in one column.
    flex-direction: column stacks children vertically instead of in a row. */
@@ -129,9 +182,39 @@
   font: inherit;
 }
 
+/* Text boxes (on the forms and the product page's Quantity box): white, with a sage border
+   and slightly rounded corners. */
+.form input,
+.add-to-cart input {
+  background: var(--white);
+  color: var(--ink);
+  border: 1px solid var(--sage);
+  border-radius: 4px;
+}
+
 .form button {
   margin-top: 1rem;
+}
+
+/* The main buttons (Register, Log in, Add to cart): brown with white text. */
+.form button,
+.add-to-cart-button {
+  font-weight: bold;
+  color: var(--white);
+  background: var(--brown);
+  border: 1px solid var(--brown);
+  border-radius: 6px;
   cursor: pointer;
+}
+
+/* Hovering swaps to peach with brown text and an orange border. (Not an orange background:
+   brown text on orange is slightly too low in contrast to read comfortably.) :not(:disabled)
+   means "only when the button can be used", so a disabled button doesn't light up. */
+.form button:hover:not(:disabled),
+.add-to-cart-button:hover:not(:disabled) {
+  color: var(--brown);
+  background: var(--peach);
+  border-color: var(--orange);
 }
 
 /* While submitting, the button is disabled: show it faded, with a "wait" cursor. */
@@ -140,18 +223,18 @@
   opacity: 0.7;
 }
 
-/* Error messages in red. */
+/* Error messages in a warm red. */
 .form-error {
-  color: #b00020;
+  color: var(--error);
 }
 
-/* The "or" between the login form and the "Sign in with..." buttons: centred and grey.
-   max-width matches .form, so it's centred under the form rather than the whole page. */
+/* The "or" between the login form and the "Sign in with..." buttons: centred and in dark
+   sage. max-width matches .form, so it's centred under the form rather than the whole page. */
 .divider {
   max-width: 24rem;
   margin: 1rem 0 0.5rem;
   text-align: center;
-  color: #666;
+  color: var(--sage-dark);
 }
 
 /* "Sign in with Google" and "Sign in with Facebook". They're links (they leave the React app
@@ -170,7 +253,9 @@
   font-weight: bold;
 }
 
-/* Each provider's own colours. ".provider-button.google" means an element with BOTH classes. */
+/* Each provider's own colours (kept as they are: Google and Facebook ask for their sign-in
+   buttons to use their brand colours). ".provider-button.google" means an element with BOTH
+   classes. */
 .provider-button.google {
   background: #fff;
   color: #222;
@@ -181,13 +266,6 @@
   background: #1877f2; /* Facebook's brand blue */
   color: #fff;
   border: 1px solid #1877f2;
-}
-
-/* A clear outline when the button is reached with the keyboard (Tab), so keyboard users can
-   see where they are. :focus-visible only applies to keyboard focus, not mouse clicks. */
-.provider-button:focus-visible {
-  outline: 3px solid #1a4fa0;
-  outline-offset: 2px;
 }
 
 /* ----- The Products grid ----- */
@@ -206,11 +284,19 @@
   padding: 0;
 }
 
-/* One card: a bordered box. height: 100% makes every card in a row as tall as the row. */
+/* One card: a white box with a sage border. height: 100% makes every card in a row as tall
+   as the row. */
 .product-card {
   height: 100%;
-  border: 1px solid #ddd;
-  border-radius: 6px;
+  background: var(--white);
+  border: 1px solid var(--sage);
+  border-radius: 8px;
+}
+
+/* Hovering turns the card's border orange. :has(...) matches the card when something inside
+   it matches, here its link being hovered. */
+.product-card:has(.product-card-link:hover) {
+  border-color: var(--orange);
 }
 
 /* The link that fills the card. display: block makes the whole card area clickable. */
@@ -221,24 +307,18 @@
   padding: 1rem;
   color: inherit;
   text-decoration: none;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
-/* Hovering lightly shades the card, so it's clear it can be clicked. */
+/* Hovering fills the card with peach, so it's clear it can be clicked. */
 .product-card-link:hover {
-  background: #f5f8fc;
-}
-
-/* The same keyboard focus outline as the provider buttons. */
-.product-card-link:focus-visible {
-  outline: 3px solid #1a4fa0;
-  outline-offset: 2px;
+  background: var(--peach);
 }
 
 .product-name {
   margin: 0 0 0.5rem;
   font-size: 1.1rem;
-  color: #1a4fa0;
+  color: var(--brown);
 }
 
 /* The description, cut to 2 lines with "…" at the end.
@@ -254,7 +334,7 @@
   line-height: 1.4;
   min-height: 2.8em;
   margin: 0 0 0.5rem;
-  color: #444;
+  color: var(--ink);
 }
 
 .product-price {
@@ -295,15 +375,11 @@
   font: inherit;
 }
 
+/* Its colours come from the shared button rule above (brown, orange on hover). */
 .add-to-cart-button {
   padding: 0.5rem 1rem;
   font: inherit;
   font-weight: bold;
-  color: #fff;
-  background: #1a4fa0;
-  border: 1px solid #1a4fa0;
-  border-radius: 4px;
-  cursor: pointer;
 }
 
 /* Disabled (sending, an invalid quantity, or sold out): faded, with a "not allowed" cursor. */
@@ -317,10 +393,17 @@
   margin: 0.25rem 0 0;
 }
 
-/* "Out of stock": small, red and in capitals, so it stands out on the card. */
+/* "✓ Added 2 to your cart." in dark sage. [role='status'] is an "attribute selector": it only
+   matches the message with role="status", so the error message (role="alert", which also has
+   this class) keeps its red from .form-error. */
+.add-to-cart-message[role='status'] {
+  color: var(--sage-dark);
+}
+
+/* "Out of stock": small, warm red and in capitals, so it stands out on the card. */
 .out-of-stock {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
   text-transform: uppercase;
-  color: #b00020;
+  color: var(--error);
 }
