@@ -9,6 +9,8 @@ import { screen, within } from '@testing-library/react';
 // userEvent simulates a real person typing and clicking.
 import userEvent from '@testing-library/user-event';
 import { AUTH_PENDING, renderAt } from '../test-utils';
+// order7: a sample order (one cleanser), shared by the order tests.
+import { order7 } from '../orders/fixtures';
 
 const ada = { id: 1, first_name: 'Ada', last_name: 'Lovelace', email: 'ada@example.com' };
 
@@ -72,8 +74,8 @@ const protectedPages = [
   ['/account', 'Your account'],
   ['/cart', 'Your Cart'],
   ['/checkout', 'Checkout'],
-  ['/orders', 'Your orders'],
-  ['/orders/7', 'Order'],
+  ['/orders', 'Your Orders'],
+  ['/orders/7', 'Order #7'],
 ];
 
 test.each(protectedPages)('logged out, %s sends you to the login page', async (url) => {
@@ -83,7 +85,7 @@ test.each(protectedPages)('logged out, %s sends you to the login page', async (u
 });
 
 test.each(protectedPages)('logged in, %s shows the "%s" page', async (url, heading) => {
-  renderAt(url, { customer: ada });
+  renderAt(url, { customer: ada, orders: [order7] });
 
   expect(await screen.findByRole('heading', { level: 1, name: heading })).toBeInTheDocument();
 });
@@ -137,13 +139,13 @@ async function logInWithForm() {
 test('logging in after being sent from /orders/7?tab=items returns there', async () => {
   fakeApi();
   // Logged out, so this page sends us to Log in, remembering where we wanted to go.
-  const router = renderAt('/orders/7?tab=items');
+  const router = renderAt('/orders/7?tab=items', { orders: [order7] });
   await screen.findByRole('heading', { level: 1, name: 'Log in' });
 
   await logInWithForm();
 
-  expect(await screen.findByRole('heading', { level: 1, name: 'Order' })).toBeInTheDocument();
-  expect(screen.getByText('Order id: 7')).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { level: 1, name: 'Order #7' })).toBeInTheDocument();
+  expect(screen.getByText('Gentle Cream Cleanser')).toBeInTheDocument();
   // router.state.location is where the app is now; the ?tab=items part must survive too.
   expect(router.state.location.search).toBe('?tab=items');
 });

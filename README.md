@@ -97,7 +97,7 @@ e-commerce-app/
 │   │   ├── App.js          # Builds the browser router from the route table
 │   │   ├── App.css         # Styles for the header, nav, page area and forms
 │   │   ├── routes.js       # Route table: which page to show for each URL
-│   │   ├── format.js       # formatPrice(): "8.50" → "£8.50" (tested in format.test.js)
+│   │   ├── format.js       # formatPrice() "£8.50", formatDate() "21 Oct 2026", formatStatus() "Paid" (tested in format.test.js)
 │   │   ├── assets/
 │   │   │   └── melsy-mart-logo.png # The logo in the header (a 192px copy, small enough to load fast)
 │   │   ├── api/
@@ -105,6 +105,8 @@ e-commerce-app/
 │   │   │   ├── auth.js     # Calls the API's /auth endpoints (register, login, logout, who's logged in, providers)
 │   │   │   ├── products.js # Calls GET /products and GET /products/:id
 │   │   │   ├── products.test.js # Tests for the products API calls and their errors
+│   │   │   ├── orders.js   # Calls GET /orders and GET /orders/:id
+│   │   │   ├── orders.test.js # Tests for the orders API calls
 │   │   │   ├── cart.js     # Calls GET /cart, POST /cart/items, PUT and DELETE /cart/items/:id
 │   │   │   └── cart.test.js # Tests for changing and removing cart items
 │   │   ├── cart/
@@ -120,13 +122,20 @@ e-commerce-app/
 │   │   │   └── access.test.js  # Tests for the nav, the guards, and logging in/out in the app
 │   │   ├── components/
 │   │   │   ├── Layout.js   # Header, main nav (changes when you log in) and the page area
+│   │   │   ├── OrderSummary.js # One order's contents: items, prices paid, total, address (reusable by checkout)
 │   │   │   ├── CartLink.js # The cart icon in the nav, with its item-count badge
 │   │   │   ├── CartLink.test.js # Tests for the badge and the icon's screen-reader name
 │   │   │   ├── ProductList.js # The grid of product cards
 │   │   │   ├── ProductCard.js # One product: name, 2-line description, price; links to its page
 │   │   │   ├── AddToCart.js # Quantity box and Add to cart button on a product's page
 │   │   │   └── AddToCart.test.js # Tests for adding, its messages, and being logged out
-│   │   ├── pages/          # One component per page (Products, a product, Cart, Register and Log in work; the rest are placeholders)
+│   │   ├── orders/
+│   │   │   ├── address.js  # addressLines(): an order's delivery address as lines, skipping empty parts
+│   │   │   ├── address.test.js # Tests for it
+│   │   │   └── fixtures.js # Sample orders shared by the tests
+│   │   ├── pages/          # One component per page (all work except Account and Checkout, which are placeholders)
+│   │   │   ├── OrdersPage.test.js # Tests for the Your Orders table
+│   │   │   ├── OrderDetailPage.test.js # Tests for one order: items, total, address, not found
 │   │   │   ├── ProductsPage.test.js # Tests for the Products grid
 │   │   │   ├── ProductDetailPage.test.js # Tests for a product's page: details, not found, errors
 │   │   │   ├── CartPage.test.js # Tests for the cart: rows, subtotal, − / + / ×, stock, errors
@@ -290,8 +299,8 @@ Stripe payments are added, only that one file should need replacing.
 ### Front end (React)
 The front end is a React app in the `front-end` folder, made with Create React App. It uses
 [React Router](https://reactrouter.com/) (v7) to move between pages without reloading the site.
-The Products, product, Cart, Register and Log in pages are connected to the API; the other pages
-are still placeholders that later tickets will connect.
+Every page is connected to the API except Account and Checkout, which are still placeholders
+that later tickets will connect.
 
 **Products (the home page)** shows every product in the shop as a grid of cards. Each card shows
 the name, the description cut to two lines, and the price (in pounds, e.g. "£8.50"). Sold-out
@@ -336,6 +345,18 @@ exactly; the page only formats them.
 - **An expired login** goes to Log in and back, as on a product's page. A product removed in
   another tab simply disappears when you next change the cart.
 
+**Your Orders** (`/orders`) lists every order you've placed, newest first, as a table: **Order**
+("Order #12", a link to that order), **Date** ("21 Oct 2026"), **Status** ("Paid") and **Total**.
+With no orders yet it says "You haven't placed any orders yet." and links to Products.
+
+**An order's page** (`/orders/:orderId`) shows the order as a centred card: "Order #12", when it
+was placed and its status, each item with the price **paid** ("£18.50 each", frozen at checkout,
+so later price changes never alter it), its quantity and row price, the total, and the delivery
+address (empty parts such as a missing second line are left out). A **×** goes back to Your
+Orders. An order that doesn't exist, belongs to someone else, or has an invalid id shows "Order
+not found". The same message for all three, so nobody can discover other customers' order
+numbers. An expired login on either page goes to Log in and back.
+
 Start the API first (`npm run dev` in the `back-end` folder), then start the front end from the
 `front-end` folder:
 ```bash
@@ -372,8 +393,8 @@ you can delete this line to keep the check on.
 | `/account` | Your account (log in needed) |
 | `/cart` | Your Cart: change quantities, remove items, see the subtotal, then checkout (log in needed) |
 | `/checkout` | Checkout (log in needed) |
-| `/orders` | Your orders (log in needed) |
-| `/orders/:orderId` | A single order (log in needed) |
+| `/orders` | Your Orders: a table of your past orders (log in needed) |
+| `/orders/:orderId` | One order: items, prices paid, total and delivery address (log in needed) |
 | anything else | Page not found |
 
 **Logged in or not:** when the app loads, it asks the API who's logged in (`GET /auth/me`), and
@@ -598,7 +619,7 @@ account, checking out (including a mistyped card and a declined payment) and vie
 orders, against the real running server. After every request it also checks that no response
 contains a password.
 
-The **front end** has 182 tests:
+The **front end** has 210 tests:
 
 | Area | Tests | Covers |
 |---|---|---|
@@ -610,7 +631,11 @@ The **front end** has 182 tests:
 | Cart context | 16 | Loading on login, clearing on logout, the server's cart after adding, changing and removing, late answers ignored |
 | Cart API | 3 | Changing and removing items, error statuses |
 | Cart icon | 8 | The badge, its screen-reader name ("Cart, 1 item"), no icon when logged out |
-| Products API and prices | 8 | Requests, error statuses, "£8.50" |
+| Your Orders | 7 | The table's columns, newest first, links, no orders, errors, an expired login |
+| Order page | 13 | Items with prices paid, the total ("1 item"), the address, the ×, "Order not found" (including invalid ids), moving between orders |
+| Order address | 3 | Lines in order, skipping missing and empty parts |
+| Orders API | 3 | Requests, error statuses |
+| Products API and formatting | 10 | Requests, error statuses, "£8.50", "21 Oct 2026", "Paid" |
 | Registration form | 12 | Fields, the exact request, mismatched passwords, errors, double clicks |
 | Login page | 14 | Fields, the exact request, errors, provider links, sign-in error codes |
 | Login record | 8 | Waiting for the API, slow answers, logging out |

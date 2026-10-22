@@ -15,6 +15,8 @@ import userEvent from '@testing-library/user-event';
 // renderAt(url) shows the app's real routes at `url` (see test-utils.js). It returns the
 // router, so a test can drive it directly (e.g. press "Back" with router.navigate(-1)).
 import { renderAt } from './test-utils';
+// order7: a sample order (one cleanser), shared by the order tests.
+import { order7 } from './orders/fixtures';
 
 // Helper: find the main nav bar. `function name(params) { ... }` declares a function.
 // `async` marks a function that uses `await`; `await` pauses until a Promise (a value that
@@ -53,8 +55,8 @@ const pages = [
   ['/account', 'Your account', ada],
   ['/cart', 'Your Cart', ada],
   ['/checkout', 'Checkout', ada],
-  ['/orders', 'Your orders', ada],
-  ['/orders/7', 'Order', ada],
+  ['/orders', 'Your Orders', ada],
+  ['/orders/7', 'Order #7', ada],
   ['/no-such-page', 'Page not found', ada],
 ];
 
@@ -62,7 +64,7 @@ const pages = [
 // (url, heading, customer), and `%s` in the test name is replaced by the first two, so each run
 // has its own name.
 test.each(pages)('%s shows the "%s" page', async (url, heading, customer) => {
-  renderAt(url, { customer, products });
+  renderAt(url, { customer, products, orders: [order7] });
 
   // findByRole('heading', { level: 1, ... }) waits for an <h1>; `name` is its visible text (exact
   // match). expect(...).toBeInTheDocument() comes from jest-dom (loaded in setupTests.js).
@@ -105,10 +107,10 @@ test('a product page shows the product whose id is in the URL', async () => {
   expect(await screen.findByText('Holds 1 litre')).toBeInTheDocument();
 });
 
-test('an order page shows the order id from the URL', async () => {
-  renderAt('/orders/7', { customer: ada });
+test('an order page shows the order whose id is in the URL', async () => {
+  renderAt('/orders/7', { customer: ada, orders: [order7] });
 
-  expect(await screen.findByText('Order id: 7')).toBeInTheDocument();
+  expect(await screen.findByText('Gentle Cream Cleanser')).toBeInTheDocument();
 });
 
 // ----- The nav bar -----
@@ -119,7 +121,7 @@ test('an order page shows the order id from the URL', async () => {
 const navTargets = [
   ['Products', 'Products', ada],
   ['Cart', 'Your Cart', ada],
-  ['Orders', 'Your orders', ada],
+  ['Orders', 'Your Orders', ada],
   ['Account', 'Your account', ada],
   ['Log in', 'Log in', null],
   ['Register', 'Register', null],
@@ -201,7 +203,7 @@ test('extra path segments after a real page show "Page not found"', async () => 
   ).toBeInTheDocument();
   // And it's not the order page: a too-long URL must not partly match /orders/:orderId.
   // queryBy... returns null instead of throwing when nothing is found, so it suits "not there".
-  expect(screen.queryByText('Order id: 7')).not.toBeInTheDocument();
+  expect(screen.queryByText('Gentle Cream Cleanser')).not.toBeInTheDocument();
 });
 
 // The memory router keeps history the same way the browser router does, so going back here
@@ -211,7 +213,7 @@ test('going back in history returns to the previous page', async () => {
   const router = renderAt('/cart', { customer: ada });
 
   userEvent.click(await within(await findNav()).findByRole('link', { name: 'Orders' }));
-  await screen.findByRole('heading', { level: 1, name: 'Your orders' });
+  await screen.findByRole('heading', { level: 1, name: 'Your Orders' });
 
   // router.navigate(-1) goes one step back in history, like the browser's Back button.
   // act() makes the test wait until React has finished drawing the result.
