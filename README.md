@@ -19,7 +19,7 @@ and complete a purchase.
     - Enable users to complete a purchase using Stripe, the payment processor
 - Documented API using Swagger
 - Enable users to view order history
-- Deploy the application using Render
+- Deploy the application using Render (not done yet: see [Future Work](#future-work))
 
 ## Database
 The database has nine tables: `customers`, `federated_credentials`, `addresses`, `categories`,
@@ -737,6 +737,14 @@ The **front end** has 234 tests:
 The API is replaced by a fake `fetch`, and Stripe by stand-ins, so no server or key is needed.
 
 ## Future Work
+- Deploy the app to [Render](https://render.com) (left for now; it runs locally only)
+  - Render's free web services sleep after 15 minutes without visitors, and the first visit
+    after that takes about a minute.
+  - A free Render PostgreSQL database expires 30 days after it's created (then is deleted after
+    a 14-day grace period), so a lasting live site needs a paid database or another free one.
+  - Deploying also needs: the session cookie set to `secure: true` with
+    `app.set('trust proxy', 1)` (see "How login works"), the Stripe test keys added as
+    environment variables, and new Google/Facebook redirect addresses if those are set up.
 - Show an image for each product
 - Enable users to rate and review products
 - Add functionality to allow for "guest" checkout (not requiring an account to place an order)
