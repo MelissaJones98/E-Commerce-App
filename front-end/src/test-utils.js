@@ -24,8 +24,15 @@ export const REQUEST_FAILS = { sentinel: 'request fails' };
 export const REQUEST_PENDING = { sentinel: 'request pending' };
 export const REQUEST_UNAUTHORIZED = { sentinel: 'request unauthorized' };
 
-// The cart renderAt() gives a logged-in customer unless a test passes its own: an empty one.
-const EMPTY_CART = { items: [], total: '0.00' };
+// The cart renderAt() gives a logged-in customer unless a test passes its own: an empty one,
+// shaped exactly like GET /cart's reply (nothing to deliver, so nothing to pay).
+const EMPTY_CART = {
+  items: [],
+  total: '0.00',
+  delivery_charge: '0.00',
+  order_total: '0.00',
+  free_delivery_remaining: '0.00',
+};
 
 // A fake fetch response: `status` (e.g. 404) and a JSON `body`. `ok` is true for 2xx statuses,
 // just like a real response.

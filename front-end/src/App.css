@@ -735,6 +735,25 @@ input:focus-visible {
   font-weight: bold;
 }
 
+/* The Items and Delivery lines above the Total: the same layout as .cart-subtotal, but closer
+   together and in normal-sized text, so the Total stands out underneath them. */
+.order-line {
+  margin-top: 0.25rem;
+  font-size: 1rem;
+}
+
+/* "Thank you, your order is confirmed", straight after paying: a pale peach banner with a
+   sage border, so it's the first thing the customer sees. */
+.order-thanks {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--cream);
+  border: 1px solid var(--sage);
+  border-radius: 6px;
+  color: var(--sage-dark);
+  font-weight: bold;
+}
+
 /* "Delivered to" and the address lines, with no bullets or list spacing. */
 .order-address {
   margin-top: 1.5rem;
@@ -750,6 +769,57 @@ input:focus-visible {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+/* ----- The Checkout page ----- */
+/* One card (it reuses .cart: white, sage border, centred) holding the order, the address and
+   the payment, top to bottom. The item rows and money lines reuse the order page's classes. */
+
+/* The three section headings: Your order, Delivery address, Payment. */
+.checkout h2 {
+  margin: 1.5rem 0 0.5rem;
+  font-size: 1.15rem;
+  color: var(--brown);
+}
+
+/* The first heading sits at the top of the card, with no extra space above it. */
+.checkout h2:first-child {
+  margin-top: 0;
+}
+
+/* "Spend £5.50 more for free delivery", under the total, in dark sage. */
+.free-delivery-hint {
+  margin: 0.5rem 0 0;
+  text-align: right;
+  color: var(--sage-dark);
+}
+
+/* The form fills the card's width (instead of .form's usual 24rem), so the Pay button lines up
+   with the totals above. */
+.checkout-form {
+  max-width: none;
+}
+
+/* Each address field: its label, input and any message stacked in one column, like the
+   fields directly inside a .form. */
+.checkout-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* Field messages sit tight under their input. */
+.checkout-field .form-error {
+  margin: 0;
+}
+
+/* The box around Stripe's card field, styled like the address inputs so it looks like part of
+   the same form. (Stripe draws the field itself inside an iframe.) */
+.card-box {
+  padding: 0.6rem 0.5rem;
+  background: var(--white);
+  border: 1px solid var(--sage);
+  border-radius: 4px;
 }
 
 /* "Out of stock": small, warm red and in capitals, so it stands out on the card. */

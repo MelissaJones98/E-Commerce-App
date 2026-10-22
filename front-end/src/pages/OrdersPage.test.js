@@ -5,7 +5,7 @@
 // screen searches the fake page; within() searches inside one part of it (here, the table).
 import { screen, within } from '@testing-library/react';
 // The shared sample orders: #12 (paid, 21 Oct 2026, £44.50) and #7 (delivered, 3 Oct 2026,
-// £12.00). See orders/fixtures.js.
+// £15.95 including £3.95 delivery). See orders/fixtures.js.
 import { order12, order7 } from '../orders/fixtures';
 import { REQUEST_FAILS, REQUEST_PENDING, REQUEST_UNAUTHORIZED, renderAt } from '../test-utils';
 
@@ -40,7 +40,8 @@ test("shows each order's number, date, status and total, newest first", async ()
     .map((tr) => within(tr).getAllByRole('cell').map((td) => td.textContent));
   expect(rows).toEqual([
     ['Order #12', '21 Oct 2026', 'Paid', '£44.50'],
-    ['Order #7', '3 Oct 2026', 'Delivered', '£12.00'],
+    // The Total column is what was paid, delivery included.
+    ['Order #7', '3 Oct 2026', 'Delivered', '£15.95'],
   ]);
 });
 

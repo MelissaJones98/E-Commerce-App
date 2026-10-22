@@ -48,7 +48,8 @@ e-commerce-app/
 │   │   ├── checkout.js     # POST /cart/checkout (turn the cart into a paid order)
 │   │   └── orders.js       # /orders routes (your order history and order details)
 │   ├── services/
-│   │   ├── payment-processor.js # FAKE payment processor (stands in for Stripe)
+│   │   ├── payment-processor.js # Stripe (test mode): hold, take (capture) or cancel a payment
+│   │   ├── delivery.js     # The delivery rule: £3.95, free from £30.00 of items (shared by the cart and checkout)
 │   │   ├── orders.js       # Builds a full order (address and items); shared by checkout and /orders
 │   │   └── federated-login.js # Google/Facebook sign-in rules: find the linked customer, link by email, or create one
 │   ├── config/
@@ -59,7 +60,8 @@ e-commerce-app/
 │   │   ├── normalize-email.js # Trims and lower-cases emails (shared by register, login and account)
 │   │   ├── parse-id.js     # Checks an id from a URL is a valid whole number
 │   │   ├── validate-customer.js # Name, email and phone rules (shared by register and account)
-│   │   └── validate-checkout.js # Shipping address and payment card rules (incl. the Luhn check)
+│   │   ├── validate-checkout.js # Shipping address, Stripe PaymentMethod id and expected total rules
+│   │   └── money.js        # toPence('24.50') = 2450 and back: exact money maths in whole pence
 │   ├── db/
 │   │   ├── index.js        # PostgreSQL connection pool and query helper
 │   │   ├── schema.sql      # Creates the database tables (for a new database)
@@ -68,7 +70,8 @@ e-commerce-app/
 │   │   │   ├── 001-add-categories.sql
 │   │   │   ├── 002-add-cart-items.sql
 │   │   │   ├── 003-add-federated-credentials.sql
-│   │   │   └── 004-add-session-table.sql
+│   │   │   ├── 004-add-session-table.sql
+│   │   │   └── 005-add-delivery-and-payment-reference.sql
 │   │   └── reset-test-db.js # Rebuilds the test database from schema.sql
 │   ├── tests/
 │   │   ├── auth.register.test.js # Tests for POST /auth/register
@@ -81,8 +84,12 @@ e-commerce-app/
 │   │   ├── account.test.js       # Tests for the /account routes
 │   │   ├── cart.test.js          # Tests for the /cart routes
 │   │   ├── checkout.test.js      # Tests for POST /cart/checkout
+│   │   ├── payment-processor.test.js # Tests for holding, taking and cancelling payments
+│   │   ├── delivery.test.js      # Tests for the delivery rule's boundaries
+│   │   ├── money.test.js         # Tests for converting prices to and from pence
 │   │   ├── orders.test.js        # Tests for the /orders routes
 │   │   ├── docs.test.js          # Tests that the Swagger docs are served, valid and accurate
+│   │   ├── fake-stripe.js  # A pretend Stripe client, so the tests never contact the real Stripe
 │   │   ├── helpers.js      # Shared test helpers (e.g. emptying tables, logging in, adding test data)
 │   │   └── e2e/            # End-to-end tests, run by Newman against the running server
 │   │       └── ecommerce-api.e2e.postman_collection.json
@@ -108,7 +115,9 @@ e-commerce-app/
 │   │   │   ├── orders.js   # Calls GET /orders and GET /orders/:id
 │   │   │   ├── orders.test.js # Tests for the orders API calls
 │   │   │   ├── cart.js     # Calls GET /cart, POST /cart/items, PUT and DELETE /cart/items/:id
-│   │   │   └── cart.test.js # Tests for changing and removing cart items
+│   │   │   ├── cart.test.js # Tests for changing and removing cart items
+│   │   │   ├── checkout.js # Calls POST /cart/checkout
+│   │   │   └── checkout.test.js # Tests for the checkout request and its errors
 │   │   ├── cart/
 │   │   │   ├── CartContext.js # The whole cart, shared with every page (useCart()): the badge's count, adding, changing, removing, reloading
 │   │   │   ├── CartContext.test.js # Tests for loading, changing and clearing the cart, and ignoring late answers
@@ -122,7 +131,8 @@ e-commerce-app/
 │   │   │   └── access.test.js  # Tests for the nav, the guards, and logging in/out in the app
 │   │   ├── components/
 │   │   │   ├── Layout.js   # Header, main nav (changes when you log in) and the page area
-│   │   │   ├── OrderSummary.js # One order's contents: items, prices paid, total, address (reusable by checkout)
+│   │   │   ├── OrderSummary.js # One order's contents: items, prices paid, delivery, total, address
+│   │   │   ├── CheckoutForm.js # The checkout's address fields, Stripe's card box and the Pay button
 │   │   │   ├── CartLink.js # The cart icon in the nav, with its item-count badge
 │   │   │   ├── CartLink.test.js # Tests for the badge and the icon's screen-reader name
 │   │   │   ├── ProductList.js # The grid of product cards
@@ -133,9 +143,10 @@ e-commerce-app/
 │   │   │   ├── address.js  # addressLines(): an order's delivery address as lines, skipping empty parts
 │   │   │   ├── address.test.js # Tests for it
 │   │   │   └── fixtures.js # Sample orders shared by the tests
-│   │   ├── pages/          # One component per page (all work except Account and Checkout, which are placeholders)
+│   │   ├── pages/          # One component per page (all work except Account, which is a placeholder)
+│   │   │   ├── CheckoutPage.test.js # Tests for checkout: totals, the address checks, every payment outcome
 │   │   │   ├── OrdersPage.test.js # Tests for the Your Orders table
-│   │   │   ├── OrderDetailPage.test.js # Tests for one order: items, total, address, not found
+│   │   │   ├── OrderDetailPage.test.js # Tests for one order: items, delivery, total, address, thank-you, not found
 │   │   │   ├── ProductsPage.test.js # Tests for the Products grid
 │   │   │   ├── ProductDetailPage.test.js # Tests for a product's page: details, not found, errors
 │   │   │   ├── CartPage.test.js # Tests for the cart: rows, subtotal, − / + / ×, stock, errors
@@ -144,8 +155,11 @@ e-commerce-app/
 │   │   ├── setupProxy.js   # Dev only: sends Google/Facebook sign-in page visits on to the API
 │   │   ├── routes.test.js  # Tests for every page URL and the navigation
 │   │   ├── App.test.js     # Tests that App shows the home page
+│   │   ├── stripe.js       # Loads Stripe.js once, with the publishable key
+│   │   ├── stripe-test-mock.js # Stand-ins for the Stripe packages, used by every test
 │   │   ├── test-utils.js   # Shared test helper: renders the app at any URL, logged in or out, with fake products and cart
-│   │   └── setupTests.js   # Test setup: jest-dom matchers and a TextEncoder polyfill
+│   │   └── setupTests.js   # Test setup: jest-dom matchers, a TextEncoder polyfill and the Stripe stand-ins
+│   ├── .env                # Your Stripe publishable key (not committed, see below)
 │   ├── .env.development    # Dev server settings: runs React on port 3001
 │   └── package.json        # Also holds "proxy": passes API requests on to port 3000
 └── docs/
@@ -203,10 +217,13 @@ above. Each one adds a table, so a table's presence shows its migration has run:
 | `002-add-cart-items.sql` | Adds the `cart_items` table (shopping carts) | `cart_items` |
 | `003-add-federated-credentials.sql` | Adds the `federated_credentials` table (Google and Facebook sign-in) and lets `customers.password_hash` be empty | `federated_credentials` |
 | `004-add-session-table.sql` | Adds the `session` table (login sessions that survive restarts) | `session` |
+| `005-add-delivery-and-payment-reference.sql` | Adds `orders.delivery_charge` (0 for existing orders) and `orders.payment_reference` (Stripe's payment id) | those two columns under `orders` → **Columns** |
 
 Run 004 **before** starting the API with this version: without the `session` table, logging in
-fails and any browser with a session cookie gets `500` errors. Each migration runs inside a
-transaction, so running one twice fails (e.g. "relation already exists") and changes nothing.
+fails and any browser with a session cookie gets `500` errors. Likewise run 005 before using
+this version: without its columns, checkout and the order pages give `500` errors. Each
+migration runs inside a transaction, so running one twice fails (e.g. "relation already exists"
+or "column already exists") and changes nothing.
 
 ### 3. Configure environment variables
 Create a file called `.env` in the `back-end` folder:
@@ -230,6 +247,10 @@ FACEBOOK_APP_ID=
 FACEBOOK_APP_SECRET=
 # Where Google and Facebook send the browser back to. The default is the React app:
 # OAUTH_CALLBACK_BASE_URL=http://localhost:3001
+
+# Stripe's SECRET test key, for checkout. See "Set up Stripe" below.
+# Without it the API still runs, but checkout replies 502.
+STRIPE_SECRET_KEY=sk_test_...
 ```
 `SESSION_SECRET` signs the login session cookie so it can't be forged. The server won't start
 without it. Generate a random value from the `back-end` folder with:
@@ -269,11 +290,49 @@ checks that the spec is valid OpenAPI, that every documented endpoint really exi
 and that each one has a summary, a section and a success response. It can't spot an endpoint
 that exists but **isn't** documented, so document new routes when you add them.
 
-**Payments are fake.** Checkout uses a fake payment processor
-(`services/payment-processor.js`) that copies [Stripe's test cards](https://docs.stripe.com/testing):
-`4242 4242 4242 4242` (or any other valid card number) succeeds, `4000 0000 0000 0002` is
-declined (`402`), and `4000 0000 0000 0119` simulates a processor outage (`502`). When real
-Stripe payments are added, only that one file should need replacing.
+**Payments use Stripe in test mode,** so no real money ever moves. In Swagger or Postman, send
+one of [Stripe's test PaymentMethod ids](https://docs.stripe.com/testing) as
+`payment_method_id`: `pm_card_visa` succeeds, `pm_card_visa_chargeDeclined` is declined (`402`),
+and `pm_card_threeDSecure2Required` needs 3-D Secure, which the shop doesn't support (`402`).
+Read the cart's `order_total` first (`GET /cart`) and send it as `expected_total`.
+
+### How checkout and payments work
+- **Delivery** costs **£3.95**, and is **free when the items come to £30.00 or more** (exactly
+  £30.00 is free). The rule lives in one place, `services/delivery.js`. `GET /cart` uses it to
+  return `delivery_charge`, `order_total` and `free_delivery_remaining`, and checkout uses it to
+  work out the charge, so the two can never disagree. Each order stores its delivery charge, and
+  its `total_amount` is items plus delivery.
+- **Card details never reach the API.** On the checkout page, Stripe's card box (Stripe
+  Elements) sends the card straight to Stripe, which gives back a PaymentMethod id (`pm_...`).
+  Only that id goes to `POST /cart/checkout`.
+- **The total check:** the page also sends the total it showed on its Pay button
+  (`expected_total`). If the cart or a price changed while the page was open, the API refuses with
+  `409` "Your cart has changed. Please check the new total." before contacting Stripe.
+- **Hold, then take.** Inside one database transaction, checkout locks the stock, **holds** the
+  money on the card (Stripe's `capture_method: 'manual'`), writes the order, then **takes** the
+  held money just before saving. If anything fails in between, the hold is **cancelled**, so the
+  customer is never charged and no refund is needed. Each order stores Stripe's payment id
+  (`payment_reference`), so it can be found in the Stripe dashboard.
+
+### Set up Stripe (test mode)
+1. Create a free account at [dashboard.stripe.com/register](https://dashboard.stripe.com/register).
+   Test mode works straight away, with no business details or bank account. **Only ever use test
+   keys** (they start `sk_test_` and `pk_test_`): they can't charge real cards.
+2. Go to [dashboard.stripe.com/test/apikeys](https://dashboard.stripe.com/test/apikeys). Under
+   **Standard keys**:
+   - the **Secret key** (`sk_test_...`, behind "Reveal test key") goes in `back-end/.env` as
+     `STRIPE_SECRET_KEY`;
+   - the **Publishable key** (`pk_test_...`, shown in full) goes in a new file,
+     `front-end/.env`, as `REACT_APP_STRIPE_PUBLISHABLE_KEY=pk_test_...`. Create React App only
+     passes variables starting `REACT_APP_` into the browser, and a publishable key is safe
+     there: it can only start a payment, never take money.
+3. Restart both servers (`npm start` only reads `.env` files when it starts).
+4. On the checkout page, pay with the test card **4242 4242 4242 4242**, any future expiry date
+   and any 3-digit CVC. **4000 0000 0000 0002** is always declined. The payment then shows in the
+   dashboard's test mode, under **Payments**.
+
+Both `.env` files are git-ignored, so neither key is ever committed. Without the publishable key,
+the checkout page says "Payments aren't available right now."
 
 ### How login works
 - **Email and password:** registering logs you in straight away. Passwords are hashed with
@@ -299,8 +358,8 @@ Stripe payments are added, only that one file should need replacing.
 ### Front end (React)
 The front end is a React app in the `front-end` folder, made with Create React App. It uses
 [React Router](https://reactrouter.com/) (v7) to move between pages without reloading the site.
-Every page is connected to the API except Account and Checkout, which are still placeholders
-that later tickets will connect.
+Every page is connected to the API except Account, which is still a placeholder that a later
+ticket will connect.
 
 **Products (the home page)** shows every product in the shop as a grid of cards. Each card shows
 the name, the description cut to two lines, and the price (in pounds, e.g. "£8.50"). Sold-out
@@ -341,9 +400,26 @@ exactly; the page only formats them.
   the stock says "Only 3 in stock.", and a product that has sold out since you added it asks you
   to remove it.
 - **An empty cart** says "Your cart is empty." with a link back to Products, and has no checkout
-  button. Proceed to checkout goes to the Checkout page, which is still a placeholder.
+  button.
 - **An expired login** goes to Log in and back, as on a product's page. A product removed in
   another tab simply disappears when you next change the cart.
+
+**Checkout** (`/checkout`, from the Cart page's **Proceed to checkout**) is one card, top to
+bottom:
+1. **Your order:** each item with its quantity and row price, the subtotal, **Delivery** (£3.95,
+   or "Free" from £30.00), the **Total**, and "Spend £5.50 more for free delivery" while
+   delivery is charged.
+2. **Delivery address:** Address line 1, Address line 2 (optional), Town / city, County
+   (optional) and Postcode. The shop delivers to the UK only, so there's no country box. A blank
+   required field says which ("Enter your postcode") and nothing is sent.
+3. **Payment:** Stripe's card box, then **Pay £28.45**, showing the exact total. While paying it
+   reads "Paying…" and can't be pressed again, so nobody is charged twice.
+
+If paying fails, the reason appears above the button and everything typed stays filled in: a
+declined card, Stripe being unavailable, or stock running out. If the cart changed in another
+tab, the page says so and shows the new total. If it works, the cart and badge empty, and the
+new order's page opens with "Thank you, your order is confirmed". An empty cart shows "Your cart
+is empty." instead of the form.
 
 **Your Orders** (`/orders`) lists every order you've placed, newest first, as a table: **Order**
 ("Order #12", a link to that order), **Date** ("21 Oct 2026"), **Status** ("Paid") and **Total**.
@@ -351,8 +427,9 @@ With no orders yet it says "You haven't placed any orders yet." and links to Pro
 
 **An order's page** (`/orders/:orderId`) shows the order as a centred card: "Order #12", when it
 was placed and its status, each item with the price **paid** ("£18.50 each", frozen at checkout,
-so later price changes never alter it), its quantity and row price, the total, and the delivery
-address (empty parts such as a missing second line are left out). A **×** goes back to Your
+so later price changes never alter it), its quantity and row price, the items' total, the
+delivery charge ("Free" when there wasn't one), the total paid, and the delivery address (empty
+parts such as a missing second line are left out). A **×** goes back to Your
 Orders. An order that doesn't exist, belongs to someone else, or has an invalid id shows "Order
 not found". The same message for all three, so nobody can discover other customers' order
 numbers. An expired login on either page goes to Log in and back.
@@ -392,9 +469,9 @@ you can delete this line to keep the check on.
 | `/login` | Log in: with email and password, or "Sign in with Google / Facebook" (when set up); links to Register |
 | `/account` | Your account (log in needed) |
 | `/cart` | Your Cart: change quantities, remove items, see the subtotal, then checkout (log in needed) |
-| `/checkout` | Checkout (log in needed) |
+| `/checkout` | Checkout: your order with delivery, a delivery address, and paying by card with Stripe (log in needed) |
 | `/orders` | Your Orders: a table of your past orders (log in needed) |
-| `/orders/:orderId` | One order: items, prices paid, total and delivery address (log in needed) |
+| `/orders/:orderId` | One order: items, prices paid, delivery, total and delivery address (log in needed) |
 | anything else | Page not found |
 
 **Logged in or not:** when the app loads, it asks the API who's logged in (`GET /auth/me`), and
@@ -504,6 +581,7 @@ shows which providers the API has picked up.
 | **Tool** | Node's test runner + Supertest | Newman (Postman's command-line runner) | Jest + React Testing Library |
 | **Server** | Not needed: the tests load the app directly | Must be running: `npm run start:test` | Not needed: the API is a fake `fetch` |
 | **Database** | `ecommerce_test`, emptied before every test | `ecommerce_test` | None |
+| **Stripe** | A pretend client (`tests/fake-stripe.js`): never contacted | Real Stripe, in test mode: needs `STRIPE_SECRET_KEY` | Stand-ins (`src/stripe-test-mock.js`): never contacted |
 
 **The test database.** Back-end tests never touch your real data. Create `ecommerce_test` once,
 and again whenever `schema.sql` changes, with `npm run db:test:reset` (in `back-end`). It drops,
@@ -552,6 +630,8 @@ running.
 - Jest and React Testing Library: front-end tests
 - Postman and Newman: end-to-end API tests
 - Swagger UI and OpenAPI 3.0: interactive API documentation
+- Stripe (test mode): card payments, with `stripe` on the server and Stripe Elements
+  (`@stripe/stripe-js`, `@stripe/react-stripe-js`) in the React app
 
 ## Error Handling and Testing
 All errors are returned as JSON in the form `{ "error": "description of the problem" }`, with an
@@ -574,15 +654,20 @@ reached, separating "the app is down" from "the database is down".
   PostgreSQL's `integer` range, so `/products/abc` returns `400` instead of a database error.
 - **Prices are exact.** They're stored as `numeric(10,2)` and returned as strings (`"8.50"`),
   because a JavaScript number could introduce rounding errors.
-- **Card numbers and CVCs are strings:** a 16-digit JSON number can lose digits, and a CVC can
-  start with `0`. Card numbers must pass the Luhn checksum, which catches most typos.
+- **Money maths is done in whole pence.** The API turns `"24.50"` into `2450` by splitting the
+  text, never with `parseFloat`, so adding delivery can't produce `28.449999`. Stripe takes pence
+  too.
 - **Checkout is one transaction.** It saves the address, creates the order, freezes each item's
   price, reduces stock and empties the cart, or, if anything fails (including a declined card),
   does none of it. It **locks** the cart's product rows (`SELECT ... FOR UPDATE`), so two
   customers buying the last item at the same moment get one success and one `409`, never
   negative stock.
-- **A processor outage is `502`, not `500`.** It's a failure of a service the API relies on, not
-  a bug in the API. The fake processor throws its own `PaymentProcessorError` so the route can
+- **Hold, then take, so nobody is charged for an order that wasn't saved.** The money is only
+  held until every database change has succeeded, and taken just before the final save. If
+  anything fails before that, the hold is cancelled. The one remaining gap, the final save
+  failing after the money is taken, is logged with Stripe's payment id (refunds are Future Work).
+- **A Stripe outage is `502`, not `500`.** It's a failure of a service the API relies on, not
+  a bug in the API. The payment service throws its own `PaymentProcessorError` so the route can
   tell the two apart.
 - **Someone else's order is `404`, not `403`.** A `403` would confirm the order exists, letting
   anyone count the shop's orders by guessing ids. The ownership check is part of the query
@@ -597,7 +682,9 @@ reached, separating "the app is down" from "the database is down".
 
 ### Testing
 Everything is built test-first: each test is written and seen to fail before the code that makes
-it pass. Back-end tests run against a real PostgreSQL test database, not mocks.
+it pass. Back-end tests run against a real PostgreSQL test database, not mocks. The one stand-in
+is Stripe: a pretend client that copies Stripe's test PaymentMethod ids, so `npm test` never
+contacts Stripe.
 
 | Area | Tests | Covers |
 |---|---|---|
@@ -607,19 +694,22 @@ it pass. Back-end tests run against a real PostgreSQL test database, not mocks.
 | Google and Facebook | 22 | New, linked and verified-email customers, redirects with the right `state` and scopes, cancelling, providers switched off |
 | Products | 62 | Listing and filtering, retired products hidden, creating, updating and retiring, duplicate SKUs, every invalid detail |
 | Account | 31 | Viewing, updating and deleting your own account only, taken emails, accounts with orders |
-| Cart | 46 | Totals checked against hand-worked values, quantities adding together, stock limits, other customers' carts invisible |
-| Checkout | 55 | The full paid order, frozen prices, stock and cart updated, declines and outages changing nothing, two customers racing for the last item |
-| Orders | 16 | History newest first, full details matching checkout, prices paid surviving price changes, other customers' orders giving `404` |
+| Cart | 48 | Totals checked against hand-worked values, delivery and the £30.00 boundary, quantities adding together, stock limits, other customers' carts invisible |
+| Checkout | 50 | The full paid order with delivery, frozen prices, stock and cart updated, a changed total refused, the cart changed while the money is held, declines, 3-D Secure, outages and failed captures changing nothing (the hold cancelled), two customers racing for the last item |
+| Payments (Stripe) | 12 | Holding with the right amount and settings, declines, 3-D Secure, unknown cards, our own bad requests, outages, a missing key, taking (including a lost reply) and cancelling |
+| Delivery and money | 12 | £3.95 under £30.00, free from exactly £30.00, an empty cart; converting to and from pence |
+| Orders | 18 | History newest first, full details matching checkout, delivery and items totals, prices paid surviving price changes, other customers' orders giving `404` |
 | API documentation | 6 | Swagger served, the spec valid, every documented endpoint existing |
-| **Back end total** | **296** | |
+| **Back end total** | **319** | |
 
-The **end-to-end collection** (48 requests, 134 checks) takes customers through registering,
+The **end-to-end collection** (50 requests, 141 checks) takes customers through registering,
 logging in, updating their account, filling and emptying their cart, logging out, deleting their
-account, checking out (including a mistyped card and a declined payment) and viewing their
-orders, against the real running server. After every request it also checks that no response
+account, checking out (with delivery, and including a malformed payment method, an out-of-date
+total, a declined card and a 3-D Secure card) and viewing their orders, against the real running
+server and Stripe's test mode. After every request it also checks that no response
 contains a password.
 
-The **front end** has 210 tests:
+The **front end** has 234 tests:
 
 | Area | Tests | Covers |
 |---|---|---|
@@ -632,7 +722,9 @@ The **front end** has 210 tests:
 | Cart API | 3 | Changing and removing items, error statuses |
 | Cart icon | 8 | The badge, its screen-reader name ("Cart, 1 item"), no icon when logged out |
 | Your Orders | 7 | The table's columns, newest first, links, no orders, errors, an expired login |
-| Order page | 13 | Items with prices paid, the total ("1 item"), the address, the ×, "Order not found" (including invalid ids), moving between orders |
+| Checkout page | 19 | The total with delivery and "Spend more", the Pay amount, blank address fields, the exact request, double submits, Stripe's card errors, declines, outages, a changed total, an emptied cart, an expired login, no Stripe key |
+| Checkout API | 2 | The request, error statuses |
+| Order page | 16 | Items with prices paid, items/delivery/total ("1 item", "Free"), the thank-you after paying (only once), the address, the ×, "Order not found" (including invalid ids), moving between orders |
 | Order address | 3 | Lines in order, skipping missing and empty parts |
 | Orders API | 3 | Requests, error statuses |
 | Products API and formatting | 10 | Requests, error statuses, "£8.50", "21 Oct 2026", "Paid" |
@@ -642,7 +734,7 @@ The **front end** has 210 tests:
 | Access control | 25 | The nav, the guards, returning to the page you wanted (also via Register), logging out |
 | Routing | 29 | Every URL, the nav links, "Page not found" |
 
-The API is replaced by a fake `fetch`, so no server is needed.
+The API is replaced by a fake `fetch`, and Stripe by stand-ins, so no server or key is needed.
 
 ## Future Work
 - Show an image for each product

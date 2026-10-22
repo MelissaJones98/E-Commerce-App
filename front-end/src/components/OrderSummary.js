@@ -1,5 +1,6 @@
 // OrderSummary: the contents of one order's card: when it was placed and its status, a row per
-// item (the price paid, the quantity, the row's price), the total, and the delivery address.
+// item (the price paid, the quantity, the row's price), what the items came to, the delivery
+// charge, the total, and the delivery address.
 //
 // It takes an order exactly as the API sends it (GET /orders/:id, or POST /cart/checkout,
 // which returns the same shape). It deliberately leaves out the heading and the × link: the
@@ -7,8 +8,8 @@
 // own heading and "Thank you" message around the same summary.
 //
 // Every price comes from the API: unit_price is the price PAID (frozen at checkout, so it
-// never changes even if the shop's price does), and line_total and total_amount were worked
-// out exactly by the database. This component only formats them.
+// never changes even if the shop's price does), and line_total, items_total, delivery_charge
+// and total_amount were worked out exactly by the API. This component only formats them.
 
 // The formatting helpers: "£44.50", "21 Oct 2026", "Paid".
 import { formatDate, formatPrice, formatStatus } from '../format';
@@ -48,10 +49,23 @@ export default function OrderSummary({ order }) {
         ))}
       </ul>
 
-      {/* "Total (3 items)  £44.50", on the right. `count === 1 ? a : b` picks "1 item" for a
-          single item, otherwise "3 items" (a template literal: ${count} inserts the number). */}
+      {/* Three lines, each a label on the left and an amount on the right:
+            Items (3 items)  £44.50
+            Delivery         Free     (or £3.95)
+            Total            £44.50
+          `count === 1 ? a : b` picks "1 item" for a single item, otherwise "3 items" (a template
+          literal: ${count} inserts the number). The API sends a free delivery as '0.00', which
+          reads better as "Free". The amounts are only formatted here, never added up. */}
+      <p className="cart-subtotal order-line">
+        <span>Items ({count === 1 ? '1 item' : `${count} items`})</span>
+        <span>{formatPrice(order.items_total)}</span>
+      </p>
+      <p className="cart-subtotal order-line">
+        <span>Delivery</span>
+        <span>{order.delivery_charge === '0.00' ? 'Free' : formatPrice(order.delivery_charge)}</span>
+      </p>
       <p className="cart-subtotal">
-        <span>Total ({count === 1 ? '1 item' : `${count} items`})</span>
+        <span>Total</span>
         <strong>{formatPrice(order.total_amount)}</strong>
       </p>
 

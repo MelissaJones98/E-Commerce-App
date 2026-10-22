@@ -20,6 +20,10 @@ import { requireAuth } from '../middleware/require-auth.js';
 // parseId(): turns an id from the URL into a number, or null if it's invalid.
 // MAX_INTEGER: the largest value a PostgreSQL `integer` column can hold.
 import { parseId, MAX_INTEGER } from '../utils/parse-id.js';
+// toPence('24.50') -> 2450, and fromPence(2450) -> '24.50': exact money maths in whole pence.
+import { toPence, fromPence } from '../utils/money.js';
+// The delivery rule, shared with checkout so the cart and the charge always agree.
+import { deliveryChargePence, FREE_DELIVERY_THRESHOLD_PENCE } from '../services/delivery.js';
 
 const router = express.Router();
 
@@ -38,7 +42,11 @@ const isPositiveInteger = (value) =>
 const validateQuantity = (quantity) =>
   isPositiveInteger(quantity) ? null : 'quantity must be a whole number of at least 1';
 
-// Reads a customer's whole cart and returns { items, total }.
+// Reads a customer's whole cart and returns
+//   { items, total, delivery_charge, order_total, free_delivery_remaining }
+// where `total` is the items only, and order_total is items + delivery: what
+// the customer will pay. free_delivery_remaining is how much more of items
+// would make delivery free (0.00 once it's free, or for an empty cart).
 // Used by GET /cart and returned after every change, so a client always gets
 // the up-to-date cart back without a second request.
 const getCart = async (customerId) => {
@@ -76,7 +84,23 @@ const getCart = async (customerId) => {
     [customerId]
   );
 
-  return { items: itemsResult.rows, total: totalResult.rows[0].total };
+  const { total } = totalResult.rows[0];
+
+  // The delivery maths, in whole pence so it's exact (see utils/money.js).
+  const itemsPence = toPence(total);
+  const deliveryPence = deliveryChargePence(itemsPence);
+  // How far short of free delivery the items are, but only while delivery is
+  // being charged. `a > 0 ? b : c` picks b when delivery costs something,
+  // otherwise c: so an empty cart, or one already over £30, gives 0.
+  const remainingPence = deliveryPence > 0 ? FREE_DELIVERY_THRESHOLD_PENCE - itemsPence : 0;
+
+  return {
+    items: itemsResult.rows,
+    total,
+    delivery_charge: fromPence(deliveryPence),
+    order_total: fromPence(itemsPence + deliveryPence),
+    free_delivery_remaining: fromPence(remainingPence),
+  };
 };
 
 // ---------------------------------------------------------------------------

@@ -17,8 +17,14 @@
 export const getOrderDetails = async (db, customerId, orderId) => {
   // The order itself. `AND customer_id = $2` is the ownership check: another
   // customer's order simply isn't found.
+  // items_total is what the items came to: the total minus delivery, worked out
+  // by PostgreSQL's exact decimal maths so the browser never has to subtract
+  // money. `AS items_total` names the result. payment_reference is deliberately
+  // NOT selected: it's for the shop, not the customer.
   const orderResult = await db.query(
-    `SELECT id, status, total_amount, created_at, shipping_address_id
+    `SELECT id, status, total_amount, delivery_charge,
+            (total_amount - delivery_charge)::numeric(12,2) AS items_total,
+            created_at, shipping_address_id
      FROM orders
      WHERE id = $1 AND customer_id = $2`,
     [orderId, customerId]
@@ -54,7 +60,7 @@ export const getOrderDetails = async (db, customerId, orderId) => {
     [orderId]
   );
 
-  // Spread syntax (`...order`) copies id, status, total_amount and
-  // created_at into the result alongside the address and items.
+  // Spread syntax (`...order`) copies id, status, total_amount, delivery_charge,
+  // items_total and created_at into the result alongside the address and items.
   return { ...order, shipping_address: addressResult.rows[0], items: itemsResult.rows };
 };

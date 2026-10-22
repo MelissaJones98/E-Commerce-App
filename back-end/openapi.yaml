@@ -689,22 +689,30 @@ paths:
       tags: [Checkout]
       summary: Pay for your cart and place an order
       description: |
+        Charges the cart's items plus delivery (£3.95, free when the items
+        come to £30.00 or more) through **Stripe, in test mode: no real money
+        moves.**
+
+        Card details never reach this API. The browser gives the card to
+        Stripe (Stripe Elements) and sends only the resulting PaymentMethod id.
+        `expected_total` is the total the customer was shown (the cart's
+        `order_total`). If the cart or a price has changed since, nothing is
+        charged and the reply is 409.
+
         In one database transaction: checks the cart isn't empty and there's
-        enough stock, takes the payment, then saves the shipping address,
-        creates the order as `paid` (freezing each product's price), reduces
-        the stock and empties the cart. If any step fails, nothing changes.
+        enough stock, checks the total, **holds** the money on the card, saves
+        the shipping address, creates the order as `paid` (freezing each
+        product's price), reduces the stock, empties the cart, then **takes**
+        the held money. If any step fails, nothing changes, and a hold is
+        cancelled so the customer is never charged.
 
-        **No real money moves.** A fake payment processor stands in for Stripe,
-        using Stripe's test card numbers:
+        Stripe's test PaymentMethod ids work in test mode:
 
-        | Card number | Result |
+        | payment_method_id | Result |
         |---|---|
-        | `4242 4242 4242 4242` | Succeeds (as does any other valid card number) |
-        | `4000 0000 0000 0002` | Declined: 402 |
-        | `4000 0000 0000 0119` | Payment processor fails: 502 |
-
-        Card details are checked first (the number must pass the Luhn check,
-        and the card mustn't have expired). They're never stored or returned.
+        | `pm_card_visa` | Succeeds |
+        | `pm_card_visa_chargeDeclined` | Declined: 402 |
+        | `pm_card_threeDSecure2Required` | Needs 3-D Secure, which isn't supported: 402 |
       security:
         - cookieAuth: []
       requestBody:
@@ -721,13 +729,23 @@ paths:
               schema:
                 $ref: '#/components/schemas/Order'
         '400':
-          description: The address or payment details are invalid, or the cart is empty.
+          description: |
+            The request is invalid, the cart is empty, or Stripe didn't accept
+            the PaymentMethod id.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-              example:
-                error: payment.card_number is not a valid card number
+              examples:
+                invalid:
+                  value:
+                    error: payment_method_id must be a Stripe PaymentMethod id (pm_...)
+                emptyCart:
+                  value:
+                    error: Your cart is empty
+                notAccepted:
+                  value:
+                    error: Your payment details weren't accepted. Please re-enter your card.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '402':
@@ -737,11 +755,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
               example:
-                error: Your card was declined
+                error: Your card was declined.
         '409':
-          $ref: '#/components/responses/NotEnoughStock'
+          description: |
+            There isn't enough stock of a product, or the total has changed
+            since the customer saw it. Nothing was charged; the cart is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                notEnoughStock:
+                  value:
+                    error: 'Not enough stock of Coffee Mug: 1 available'
+                totalChanged:
+                  value:
+                    error: Your cart has changed. Please check the new total.
         '502':
-          description: The payment processor failed. Nothing was charged, and nothing changed.
+          description: Stripe failed. Nothing was charged, and nothing changed.
           content:
             application/json:
               schema:
@@ -1050,7 +1081,19 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CartItem'
-        total: { type: string, example: '17.00' }
+        total: { type: string, description: The items only., example: '17.00' }
+        delivery_charge:
+          type: string
+          description: £3.95, or 0.00 when the items come to £30.00 or more (or the cart is empty).
+          example: '3.95'
+        order_total:
+          type: string
+          description: Items plus delivery, what checkout will charge. Send it as expected_total.
+          example: '20.95'
+        free_delivery_remaining:
+          type: string
+          description: How much more of items would make delivery free (0.00 once it's free).
+          example: '13.00'
 
     AddCartItemInput:
       type: object
@@ -1082,39 +1125,22 @@ components:
           description: A 2-letter country code (stored in capitals).
           example: GB
 
-    PaymentInput:
-      type: object
-      required: [cardholder_name, card_number, expiry_month, expiry_year, cvc]
-      properties:
-        cardholder_name: { type: string, example: Ada Lovelace }
-        card_number:
-          type: string
-          pattern: '^[0-9\s-]+$'
-          description: |
-            A string (a JSON number could lose digits). Spaces and hyphens are
-            allowed. Must be 12-19 digits and pass the Luhn check.
-          example: 4242 4242 4242 4242
-        expiry_month: { type: integer, minimum: 1, maximum: 12, example: 12 }
-        expiry_year:
-          type: integer
-          minimum: 1000
-          maximum: 9999
-          description: A 4-digit year. The card mustn't have expired.
-          example: 2030
-        cvc:
-          type: string
-          pattern: '^\d{3,4}$'
-          description: 3 or 4 digits, as a string (codes can start with 0).
-          example: '123'
-
     CheckoutInput:
       type: object
-      required: [shipping_address, payment]
+      required: [shipping_address, payment_method_id, expected_total]
       properties:
         shipping_address:
           $ref: '#/components/schemas/ShippingAddressInput'
-        payment:
-          $ref: '#/components/schemas/PaymentInput'
+        payment_method_id:
+          type: string
+          pattern: '^pm_'
+          description: Stripe's id for the customer's card, from Stripe Elements.
+          example: pm_card_visa
+        expected_total:
+          type: string
+          pattern: '^\d+\.\d{2}$'
+          description: The total the customer was shown (the cart's order_total).
+          example: '20.95'
 
     # --- Orders -------------------------------------------------------------
 
@@ -1154,7 +1180,15 @@ components:
         id: { type: integer, example: 1 }
         status:
           $ref: '#/components/schemas/OrderStatus'
-        total_amount: { type: string, example: '17.00' }
+        total_amount:
+          type: string
+          description: Items plus delivery, what was paid.
+          example: '20.95'
+        delivery_charge:
+          type: string
+          description: What was paid for delivery (0.00 if free, or for orders from before delivery existed).
+          example: '3.95'
+        items_total: { type: string, description: What the items came to., example: '17.00' }
         created_at: { type: string, format: date-time }
         shipping_address:
           $ref: '#/components/schemas/Address'

@@ -12,11 +12,14 @@ export const address = {
   country_code: 'GB',
 };
 
-// 2 serums at £18.50 (£37.00) and 1 hand cream at £7.50: £44.50 for 3 items.
+// 2 serums at £18.50 (£37.00) and 1 hand cream at £7.50: £44.50 for 3 items. That's over £30,
+// so delivery was free and the total is also £44.50.
 export const order12 = {
   id: 12,
   status: 'paid',
   total_amount: '44.50',
+  delivery_charge: '0.00',
+  items_total: '44.50',
   created_at: '2026-10-21T12:00:00.000Z',
   shipping_address: address,
   items: [
@@ -25,11 +28,13 @@ export const order12 = {
   ],
 };
 
-// One item: a cleanser at £12.00.
+// One item: a cleanser at £12.00, plus £3.95 delivery: £15.95 in total.
 export const order7 = {
   id: 7,
   status: 'delivered',
-  total_amount: '12.00',
+  total_amount: '15.95',
+  delivery_charge: '3.95',
+  items_total: '12.00',
   created_at: '2026-10-03T12:00:00.000Z',
   shipping_address: address,
   items: [

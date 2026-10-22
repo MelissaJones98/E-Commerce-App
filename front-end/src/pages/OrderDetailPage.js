@@ -5,7 +5,10 @@
 // out which order numbers exist), or has an invalid id.
 
 // useParams reads the :orderId part of the URL. Link changes page without reloading.
-import { Link, useParams } from 'react-router';
+// useLocation gives the current location, including any `state` passed along with the page
+// change (the checkout page passes { justPlaced: true } straight after paying).
+// useNavigate gives navigate(), used here to clear that state from the history.
+import { Link, useLocation, useNavigate, useParams } from 'react-router';
 // useState remembers the page's state between re-draws; useEffect runs code after the page is
 // drawn (here: fetching the order).
 import { useEffect, useState } from 'react';
@@ -25,6 +28,25 @@ export default function OrderDetailPage() {
   // URL parameters are always strings: '12', not 12.
   const { orderId } = useParams();
   const { setCustomer } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  // True only when the checkout page has just sent the customer here. `?.` reads justPlaced
+  // only if there is a state (opening the page any other way has none, so this is undefined).
+  // It's copied into state ONCE, when the page opens: useState(() => ...) only runs the function
+  // the first time. That way the message stays on screen after the history is cleared below.
+  const [justPlaced] = useState(() => location.state?.justPlaced === true);
+
+  // The browser keeps a page's state in its history, so a reload (or Back, then Forward) would
+  // bring { justPlaced: true } back and say thank you again. So straight away, replace this
+  // history entry with the same address and no state. `replace: true` swaps the entry instead
+  // of adding a new one, so Back still goes where it did before.
+  useEffect(() => {
+    if (location.state?.justPlaced) {
+      navigate(location.pathname, { replace: true, state: null });
+    }
+    // Only when the page opens: the check above stops it doing anything a second time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // status: 'loading', 'ready' (the order arrived), 'not-found' or 'error'.
   const [state, setState] = useState({ status: 'loading', order: null });
 
@@ -98,6 +120,13 @@ export default function OrderDetailPage() {
       </Link>
       {/* {order.id} inside JSX inserts the number: "Order #12". */}
       <h1>Order #{order.id}</h1>
+      {/* `justPlaced && (...)` draws the message only when justPlaced is true. role="status"
+          lets screen readers announce it. */}
+      {justPlaced && (
+        <p role="status" className="order-thanks">
+          Thank you, your order is confirmed
+        </p>
+      )}
       <OrderSummary order={order} />
     </section>
   );

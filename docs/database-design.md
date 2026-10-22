@@ -71,6 +71,8 @@ erDiagram
         int shipping_address_id FK
         order_status status
         decimal total_amount
+        decimal delivery_charge
+        varchar payment_reference
         timestamptz created_at
         timestamptz updated_at
     }
@@ -253,7 +255,9 @@ migration 004.
 | customer_id | integer | NOT NULL, FK → `customers.id`, ON DELETE RESTRICT |
 | shipping_address_id | integer | NOT NULL, FK → `addresses.id`, ON DELETE RESTRICT |
 | status | order_status (enum) | NOT NULL, default `'pending'` |
-| total_amount | numeric(10,2) | NOT NULL, CHECK `total_amount >= 0` |
+| total_amount | numeric(10,2) | NOT NULL, CHECK `total_amount >= 0`. Items plus delivery |
+| delivery_charge | numeric(10,2) | NOT NULL, default `0`, CHECK `delivery_charge >= 0` |
+| payment_reference | varchar(255) | Stripe PaymentIntent id (`pi_…`); NULL before Stripe |
 | created_at | timestamptz | NOT NULL, default `now()` |
 | updated_at | timestamptz | NOT NULL, default `now()` |
 
@@ -283,7 +287,9 @@ migration 004.
   values like `0.10` exactly, which causes rounding errors in totals.
 - **`order_items.unit_price` copies the product price at checkout.** If a product's
   price changes later, past orders still show what the customer actually paid.
-  `orders.total_amount` is likewise calculated once at checkout and stored.
+  `orders.total_amount` (items plus delivery) and `orders.delivery_charge` are likewise
+  calculated once at checkout and stored. Orders placed before delivery existed have a
+  `delivery_charge` of 0 (migration 005).
 - **Order history is protected.** Customers, addresses and products that appear on
   an order can't be deleted (`ON DELETE RESTRICT`). Retire products with
   `is_active = false` instead of deleting them.

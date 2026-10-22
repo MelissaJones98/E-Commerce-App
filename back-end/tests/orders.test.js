@@ -27,7 +27,9 @@ import pool from '../db/index.js';
 //   loggedInAgent: registers and logs in a customer; returns an agent that stays logged in
 //   insertProduct: adds a product with SQL, returning its id
 //   placeOrder:    adds items to the agent's cart, then checks out; returns the response
-import { resetTables, loggedInAgent, insertProduct, placeOrder } from './helpers.js';
+//   resetFakeStripe: clears the pretend Stripe's record (importing helpers.js
+//                    also installs it, so these tests never contact the real Stripe)
+import { resetTables, loggedInAgent, insertProduct, placeOrder, resetFakeStripe } from './helpers.js';
 
 // The customer most tests log in as. Registered first, so their id is 1.
 const ada = {
@@ -52,8 +54,12 @@ const assertIsDate = (value) => {
   assert.equal(Number.isNaN(Date.parse(value)), false);
 };
 
-// Empty every table before each test, so tests can't affect each other.
-beforeEach(resetTables);
+// Empty every table, and clear the pretend Stripe, before each test, so tests
+// can't affect each other.
+beforeEach(async () => {
+  await resetTables();
+  resetFakeStripe();
+});
 // Close the database connections after the last test, or Node won't exit.
 after(() => pool.end());
 
@@ -95,10 +101,10 @@ describe('GET /orders', () => {
     res.body.forEach((order) => assertIsDate(order.created_at));
     const withoutDates = res.body.map(({ created_at, ...summary }) => summary);
     // Newest first, so order 2 comes before order 1.
-    // Hand-checked: order 1 = 2 x 8.50 + 1 x 24.00 = 41.00, with 2 + 1 = 3 items;
-    //               order 2 = 1 x 8.50 = 8.50, with 1 item.
+    // Hand-checked: order 1 = 2 x 8.50 + 1 x 24.00 = 41.00 (free delivery), with 2 + 1 = 3 items;
+    //               order 2 = 1 x 8.50 = 8.50, + 3.95 delivery = 12.45, with 1 item.
     assert.deepEqual(withoutDates, [
-      { id: 2, status: 'paid', total_amount: '8.50', item_count: 1 },
+      { id: 2, status: 'paid', total_amount: '12.45', item_count: 1 },
       { id: 1, status: 'paid', total_amount: '41.00', item_count: 3 },
     ]);
   });
@@ -126,8 +132,8 @@ describe('GET /orders', () => {
     await pool.query("UPDATE products SET price = '99.00' WHERE id = $1", [mug]);
     const res = await agent.get('/orders');
 
-    // Still 2 x 8.50, the price actually paid.
-    assert.equal(res.body[0].total_amount, '17.00');
+    // Still 2 x 8.50 = 17.00, the price actually paid, + 3.95 delivery = 20.95.
+    assert.equal(res.body[0].total_amount, '20.95');
   });
 });
 
@@ -157,11 +163,14 @@ describe('GET /orders/:orderId', () => {
     assert.equal(res.status, 200);
     const { created_at, ...details } = res.body;
     assertIsDate(created_at);
-    // Hand-checked: 2 x 8.50 = 17.00; 1 x 24.00 = 24.00; total 41.00.
+    // Hand-checked: 2 x 8.50 = 17.00; 1 x 24.00 = 24.00; items 41.00. That's
+    // over £30, so delivery is free and the total is also 41.00.
     assert.deepEqual(details, {
       id: 1,
       status: 'paid',
       total_amount: '41.00',
+      delivery_charge: '0.00',
+      items_total: '41.00',
       shipping_address: {
         id: 1,
         line_1: '10 Downing Street',
@@ -206,7 +215,59 @@ describe('GET /orders/:orderId', () => {
     assert.deepEqual(res.body.items, [
       { product_id: 1, sku: 'MUG-001', name: 'Coffee Mug', quantity: 2, unit_price: '8.50', line_total: '17.00' },
     ]);
-    assert.equal(res.body.total_amount, '17.00');
+    // 17.00 of items + 3.95 delivery.
+    assert.equal(res.body.total_amount, '20.95');
+  });
+
+  // The next two tests write an order straight into the database (instead of
+  // checking out), so they can set delivery_charge and payment_reference exactly.
+  // Returns the new order's id. Ada (id 1) must already be registered.
+  // `delivery` is optional: when it's left out (undefined), the INSERT leaves
+  // the column out too, so the database's DEFAULT is used, as for old orders.
+  const insertOrder = async ({ total, delivery }) => {
+    const address = await pool.query(
+      `INSERT INTO addresses (customer_id, line_1, city, postal_code, country_code)
+       VALUES (1, '10 Downing Street', 'London', 'SW1A 2AA', 'GB') RETURNING id`
+    );
+    // `delivery === undefined ? a : b` picks one of two INSERTs: without the
+    // delivery_charge column, or with it.
+    const result = delivery === undefined
+      ? await pool.query(
+          `INSERT INTO orders (customer_id, shipping_address_id, status, total_amount)
+           VALUES (1, $1, 'paid', $2) RETURNING id`,
+          [address.rows[0].id, total]
+        )
+      : await pool.query(
+          `INSERT INTO orders (customer_id, shipping_address_id, status, total_amount, delivery_charge, payment_reference)
+           VALUES (1, $1, 'paid', $2, $3, 'pi_test_123') RETURNING id`,
+          [address.rows[0].id, total, delivery]
+        );
+    return result.rows[0].id;
+  };
+
+  test('returns the delivery charge and the items total, but not the payment reference', async () => {
+    const agent = await loggedInAgent(ada);
+    // £24.50 of items + £3.95 delivery = £28.45.
+    const orderId = await insertOrder({ total: '28.45', delivery: '3.95' });
+
+    const res = await agent.get(`/orders/${orderId}`);
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.delivery_charge, '3.95');
+    assert.equal(res.body.items_total, '24.50');
+    // `in` checks whether an object has a property. Stripe's payment id is
+    // stored for the shop, but customers don't need it.
+    assert.equal('payment_reference' in res.body, false);
+  });
+
+  test('an order from before delivery existed has a delivery charge of 0.00', async () => {
+    const agent = await loggedInAgent(ada);
+    const orderId = await insertOrder({ total: '17.00' });
+
+    const res = await agent.get(`/orders/${orderId}`);
+
+    assert.equal(res.body.delivery_charge, '0.00');
+    assert.equal(res.body.items_total, '17.00');
   });
 
   test('returns 404 when the order does not exist', async () => {

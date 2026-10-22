@@ -6,6 +6,22 @@ import request from 'supertest';
 import app from '../app.js';
 // The database connection pool, used to set up and inspect test data directly.
 import pool from '../db/index.js';
+// setStripeClient(): swaps the payment service's Stripe client for another one.
+import { setStripeClient } from '../services/payment-processor.js';
+// The pretend Stripe (see tests/fake-stripe.js).
+import { createFakeStripe, resetFake } from './fake-stripe.js';
+
+// The pretend Stripe every test that uses these helpers talks to. It's
+// installed the moment this file is first imported, so no test can ever reach
+// the real Stripe by accident, even though `npm test` loads back-end/.env,
+// which holds a real (test-mode) key. Tests read fakeStripe.calls to check what
+// was asked of Stripe, and set fakeStripe.captureFails / cancelFails.
+export const fakeStripe = createFakeStripe();
+setStripeClient(fakeStripe);
+
+// Clears the fake's record of calls and failure settings. The checkout and
+// orders tests run this before every test, with resetTables.
+export const resetFakeStripe = () => resetFake(fakeStripe);
 
 // Empties every table and restarts id numbering at 1, so each test starts
 // from a clean, predictable database (e.g. the first customer always has id 1).
@@ -55,8 +71,10 @@ export const loggedInAgent = async (details = {}) => {
   return agent;
 };
 
-// A valid POST /cart/checkout body: a shipping address, plus the test card
-// number that the fake payment processor always accepts.
+// Most of a valid POST /cart/checkout body: a shipping address, plus Stripe's
+// test PaymentMethod id that the pretend Stripe always holds successfully.
+// The third part, expected_total, depends on the cart, so each test adds it
+// (see placeOrder below, and checkout() in checkout.test.js).
 export const validCheckout = {
   shipping_address: {
     line_1: '10 Downing Street',
@@ -66,17 +84,12 @@ export const validCheckout = {
     postal_code: 'SW1A 2AA',
     country_code: 'GB',
   },
-  payment: {
-    cardholder_name: 'Test Customer',
-    card_number: '4242 4242 4242 4242',
-    expiry_month: 12,
-    expiry_year: 2099,
-    cvc: '123',
-  },
+  payment_method_id: 'pm_card_visa',
 };
 
 // Places an order as the given logged-in agent, using the real APIs exactly
-// as a customer would: add each item to the cart, then check out.
+// as a customer would: add each item to the cart, read the cart's total (the
+// amount the checkout page shows), then check out with that total.
 // `items` is an array of { product_id, quantity }.
 // Returns the checkout response (res.body is the new order).
 export const placeOrder = async (agent, items) => {
@@ -84,7 +97,8 @@ export const placeOrder = async (agent, items) => {
   for (const item of items) {
     await agent.post('/cart/items').send(item);
   }
-  return agent.post('/cart/checkout').send(validCheckout);
+  const cart = await agent.get('/cart');
+  return agent.post('/cart/checkout').send({ ...validCheckout, expected_total: cart.body.order_total });
 };
 
 // Inserts a category directly into the database and returns its new id.

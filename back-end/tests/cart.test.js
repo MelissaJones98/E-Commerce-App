@@ -83,7 +83,43 @@ describe('GET /cart', () => {
 
     assert.equal(res.status, 200);
     // Money is always sent as a string with 2 decimal places, like product prices.
-    assert.deepEqual(res.body, { items: [], total: '0.00' });
+    // An empty cart has nothing to deliver, so delivery is 0.00 too.
+    assert.deepEqual(res.body, {
+      items: [],
+      total: '0.00',
+      delivery_charge: '0.00',
+      order_total: '0.00',
+      free_delivery_remaining: '0.00',
+    });
+  });
+
+  // The delivery fields: £3.95 delivery under £30.00 of items, free from £30.00
+  // (see services/delivery.js). `total` stays the items only, and order_total
+  // is what the customer will pay.
+  test('adds £3.95 delivery under £30.00, and says how much more makes it free', async () => {
+    const serum = await insertProduct({ price: '24.50', stock_quantity: 10 });
+    const agent = await loggedInAgent(ada);
+    await agent.post('/cart/items').send({ product_id: serum, quantity: 1 });
+
+    const res = await agent.get('/cart');
+
+    // Hand-checked: 24.50 + 3.95 = 28.45, and 30.00 - 24.50 = 5.50.
+    assert.equal(res.body.total, '24.50');
+    assert.equal(res.body.delivery_charge, '3.95');
+    assert.equal(res.body.order_total, '28.45');
+    assert.equal(res.body.free_delivery_remaining, '5.50');
+  });
+
+  test('delivery is free when the items come to exactly £30.00', async () => {
+    const serum = await insertProduct({ price: '30.00', stock_quantity: 10 });
+    const agent = await loggedInAgent(ada);
+    await agent.post('/cart/items').send({ product_id: serum, quantity: 1 });
+
+    const res = await agent.get('/cart');
+
+    assert.equal(res.body.delivery_charge, '0.00');
+    assert.equal(res.body.order_total, '30.00');
+    assert.equal(res.body.free_delivery_remaining, '0.00');
   });
 
   test('lists each item with its line total, plus the cart total, in the order added', async () => {
@@ -105,6 +141,10 @@ describe('GET /cart', () => {
         { product_id: 1, sku: 'MUG-001', name: 'Coffee Mug', price: '8.50', quantity: 2, line_total: '17.00' },
       ],
       total: '41.00',
+      // Over £30.00, so delivery is free.
+      delivery_charge: '0.00',
+      order_total: '41.00',
+      free_delivery_remaining: '0.00',
     });
   });
 
@@ -148,7 +188,8 @@ describe('GET /cart', () => {
     const res = await graceAgent.get('/cart');
 
     // Grace hasn't added anything, so her cart is empty even though Ada's isn't.
-    assert.deepEqual(res.body, { items: [], total: '0.00' });
+    assert.deepEqual(res.body.items, []);
+    assert.equal(res.body.total, '0.00');
   });
 });
 
@@ -176,6 +217,10 @@ describe('POST /cart/items', () => {
         { product_id: 1, sku: 'MUG-001', name: 'Coffee Mug', price: '8.50', quantity: 2, line_total: '17.00' },
       ],
       total: '17.00',
+      // The same delivery fields as GET /cart: 17.00 + 3.95 = 20.95; 30.00 - 17.00 = 13.00.
+      delivery_charge: '3.95',
+      order_total: '20.95',
+      free_delivery_remaining: '13.00',
     });
   });
 
@@ -339,6 +384,9 @@ describe('PUT /cart/items/:productId', () => {
         { product_id: 1, sku: 'MUG-001', name: 'Coffee Mug', price: '8.50', quantity: 5, line_total: '42.50' },
       ],
       total: '42.50',
+      delivery_charge: '0.00',
+      order_total: '42.50',
+      free_delivery_remaining: '0.00',
     });
   });
 

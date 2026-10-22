@@ -1,7 +1,7 @@
 // Tests for one order's page (/orders/:orderId). renderAt (test-utils.js) answers
 // GET /orders/:id from its `orders` option, the way the API does.
 
-import { act, screen, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { order12, order7 } from '../orders/fixtures';
 import { REQUEST_FAILS, REQUEST_PENDING, REQUEST_UNAUTHORIZED, renderAt } from '../test-utils';
 
@@ -41,19 +41,64 @@ test('shows each item with the price paid, quantity and row price', async () => 
   expect(within(row('Rose Hand Cream')).getByText('£7.50', { selector: '.order-item-total' })).toBeInTheDocument();
 });
 
-test('shows the total with the number of items', async () => {
-  openOrder(12);
-  await findHeading('Order #12');
+// One line of the money summary under the items, e.g. "Delivery £3.95": the <p> that holds the
+// label. within() then looks for the amount inside that line only.
+function moneyLine(label) {
+  return screen.getByText(label).closest('p');
+}
 
-  expect(screen.getByText('Total (3 items)')).toBeInTheDocument();
-  expect(screen.getByText('£44.50')).toBeInTheDocument();
-});
-
-test('a one-item order says "1 item"', async () => {
+test('shows the items total with the number of items, the delivery charge and the total', async () => {
   openOrder(7);
   await findHeading('Order #7');
 
-  expect(screen.getByText('Total (1 item)')).toBeInTheDocument();
+  // order7: £12.00 of items + £3.95 delivery = £15.95.
+  expect(within(moneyLine('Items (1 item)')).getByText('£12.00')).toBeInTheDocument();
+  expect(within(moneyLine('Delivery')).getByText('£3.95')).toBeInTheDocument();
+  expect(within(moneyLine('Total')).getByText('£15.95')).toBeInTheDocument();
+});
+
+test('free delivery says "Free", and a 3-item order says "3 items"', async () => {
+  openOrder(12);
+  await findHeading('Order #12');
+
+  // order12: £44.50 of items, over £30, so delivery was free.
+  expect(within(moneyLine('Items (3 items)')).getByText('£44.50')).toBeInTheDocument();
+  expect(within(moneyLine('Delivery')).getByText('Free')).toBeInTheDocument();
+  expect(within(moneyLine('Total')).getByText('£44.50')).toBeInTheDocument();
+});
+
+// Straight after paying, the checkout page opens the order with { justPlaced: true } in the
+// router's "state" (data passed along with the page change, not shown in the URL). renderAt
+// accepts a location object as well as a URL, so a test can pass that state too.
+test('straight after paying, says thank you', async () => {
+  renderAt({ pathname: '/orders/7', state: { justPlaced: true } }, { customer: ada, orders: [order7] });
+
+  await findHeading('Order #7');
+  expect(screen.getByRole('status')).toHaveTextContent('Thank you, your order is confirmed');
+});
+
+// The browser keeps a page's state in its history, so a reload (or Back, then Forward) would
+// bring { justPlaced: true } back and say thank you again. So the page removes the state from
+// the history straight away, while still showing the message this once.
+test('removes the thank-you from the history, so a reload will not show it again', async () => {
+  const router = renderAt(
+    { pathname: '/orders/7', state: { justPlaced: true } },
+    { customer: ada, orders: [order7] },
+  );
+
+  await findHeading('Order #7');
+  // The message is still on screen...
+  expect(screen.getByRole('status')).toHaveTextContent('Thank you, your order is confirmed');
+  // ...but the history entry no longer carries it. waitFor retries until the state is cleared.
+  await waitFor(() => expect(router.state.location.state).toBeNull());
+  expect(router.state.location.pathname).toBe('/orders/7');
+});
+
+test('opened any other way, there is no thank-you message', async () => {
+  openOrder(7);
+  await findHeading('Order #7');
+
+  expect(screen.queryByText('Thank you, your order is confirmed')).not.toBeInTheDocument();
 });
 
 test('shows the delivery address', async () => {

@@ -49,6 +49,11 @@
       "key": "checkoutOrder",
       "value": "",
       "description": "The whole order returned by checkout, saved as a JSON string, so 'View the order's details' can check GET /orders/:orderId returns exactly the same thing."
+    },
+    {
+      "key": "orderTotal",
+      "value": "",
+      "description": "The cart's order_total (items + delivery), saved by 'Add 2 to the cart'. Checkout requests send it as expected_total, as the checkout page does."
     }
   ],
   "event": [
@@ -552,9 +557,16 @@
                   "  pm.response.to.have.status(200);",
                   "});",
                   "",
-                  "// .to.deep.equal compares every property: no items, and a total of '0.00'.",
+                  "// .to.deep.equal compares every property: no items, a total of '0.00',",
+                  "// and nothing to deliver, so no delivery charge either.",
                   "pm.test('the new customer starts with an empty cart', function () {",
-                  "  pm.expect(pm.response.json()).to.deep.equal({ items: [], total: '0.00' });",
+                  "  pm.expect(pm.response.json()).to.deep.equal({",
+                  "    items: [],",
+                  "    total: '0.00',",
+                  "    delivery_charge: '0.00',",
+                  "    order_total: '0.00',",
+                  "    free_delivery_remaining: '0.00'",
+                  "  });",
                   "});"
                 ]
               }
@@ -830,7 +842,8 @@
                   "",
                   "// A fresh GET proves the cart really was emptied in the database.",
                   "pm.test('the cart is empty again', function () {",
-                  "  pm.expect(pm.response.json()).to.deep.equal({ items: [], total: '0.00' });",
+                  "  pm.expect(pm.response.json().items).to.deep.equal([]);",
+                  "  pm.expect(pm.response.json().order_total).to.equal('0.00');",
                   "});"
                 ]
               }
@@ -1071,7 +1084,7 @@
     },
     {
       "name": "5. Checkout and orders",
-      "description": "A second test customer buys a product, going through every checkout outcome: a mistyped card (400), a declined card (402, with the cart kept), a successful payment (201, a paid order, the cart emptied and the stock reduced), checking out an empty cart (400), and checking out while logged out (401). In between, the new order is read back through the order history routes: the history lists exactly one order, its details match what checkout returned, an unknown order is 404, and a logged-out request is 401.\n\nThis uses a NEW customer because the folder 4 customer has been deleted. Placing an order makes a customer's history permanent: the last request checks that this customer's account can't now be deleted (409). That's why these tests run against the test database, which `npm test` and `npm run db:test:reset` wipe.\n\nThe product costs 8.50 with 5 in stock, and the customer buys 2, so the total is 17.00 and 3 are left afterwards.",
+      "description": "A second test customer buys a product, going through every checkout outcome: a malformed payment method id (400), an out-of-date total (409), a declined card (402, with the cart kept), a card needing 3-D Secure (402), a successful payment (201, a paid order, the cart emptied and the stock reduced), checking out an empty cart (400), and checking out while logged out (401). In between, the new order is read back through the order history routes: the history lists exactly one order, its details match what checkout returned, an unknown order is 404, and a logged-out request is 401.\n\nPayments go through REAL Stripe in TEST MODE (no real money moves), so the API needs STRIPE_SECRET_KEY (a sk_test_ key) in back-end/.env. The requests send Stripe's test PaymentMethod ids (pm_card_visa and so on) instead of card details. A Stripe outage (502) can't be caused on purpose against real Stripe, so that case is covered by the unit tests (npm test) only.\n\nThis uses a NEW customer because the folder 4 customer has been deleted. Placing an order makes a customer's history permanent: the last request checks that this customer's account can't now be deleted (409). That's why these tests run against the test database, which `npm test` and `npm run db:test:reset` wipe.\n\nThe product costs 8.50 with 5 in stock, and the customer buys 2: 17.00 of items, which is under 30.00, so 3.95 delivery is added for a total of 20.95. 3 are left afterwards.",
       "item": [
         {
           "name": "Register a checkout customer",
@@ -1199,6 +1212,19 @@
                   "// Hand-checked: 2 x 8.50 = 17.00.",
                   "pm.test('the cart total is 17.00', function () {",
                   "  pm.expect(pm.response.json().total).to.equal('17.00');",
+                  "});",
+                  "",
+                  "// 17.00 is under 30.00, so 3.95 delivery is added: 20.95 to pay,",
+                  "// and 30.00 - 17.00 = 13.00 more would make delivery free.",
+                  "pm.test('adds 3.95 delivery, for 20.95 to pay', function () {",
+                  "  const cart = pm.response.json();",
+                  "  pm.expect(cart.delivery_charge).to.equal('3.95');",
+                  "  pm.expect(cart.order_total).to.equal('20.95');",
+                  "  pm.expect(cart.free_delivery_remaining).to.equal('13.00');",
+                  "",
+                  "  // Save the total the customer would be shown. Checkout must be sent",
+                  "  // it as expected_total, the way the checkout page does.",
+                  "  pm.collectionVariables.set('orderTotal', cart.order_total);",
                   "});"
                 ]
               }
@@ -1219,15 +1245,15 @@
           }
         },
         {
-          "name": "Check out with a mistyped card number (refused)",
+          "name": "Check out with a malformed payment method id (refused)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// The last digit is wrong (4241 instead of 4242), so the card number",
-                  "// fails the Luhn checksum. It's caught before any payment is attempted.",
+                  "// Stripe PaymentMethod ids always start pm_, so card_123 is refused",
+                  "// before Stripe is contacted at all.",
                   "pm.test('status is 400 Bad Request', function () {",
                   "  pm.response.to.have.status(400);",
                   "});",
@@ -1246,11 +1272,47 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"shipping_address\": {\n    \"line_1\": \"10 Downing Street\",\n    \"city\": \"London\",\n    \"postal_code\": \"SW1A 2AA\",\n    \"country_code\": \"GB\"\n  },\n  \"payment\": {\n    \"cardholder_name\": \"E2E Shopper\",\n    \"card_number\": \"4242 4242 4242 4241\",\n    \"expiry_month\": 12,\n    \"expiry_year\": 2099,\n    \"cvc\": \"123\"\n  }\n}",
+              "raw": "{\n  \"shipping_address\": {\n    \"line_1\": \"10 Downing Street\",\n    \"city\": \"London\",\n    \"postal_code\": \"SW1A 2AA\",\n    \"country_code\": \"GB\"\n  },\n  \"payment_method_id\": \"card_123\",\n  \"expected_total\": \"{{orderTotal}}\"\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/cart/checkout",
-            "description": "POST /cart/checkout with a card number that has one wrong digit. Expects 400. The payment details are checked before anything else happens."
+            "description": "POST /cart/checkout with a payment_method_id that isn't a Stripe PaymentMethod id. Expects 400. The request is checked before anything else happens."
+          }
+        },
+        {
+          "name": "Check out with an out-of-date total (refused)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 17.00 is the items without delivery, so it doesn't match the 20.95",
+                  "// the cart really comes to. The API refuses to charge an amount the",
+                  "// customer wasn't shown, before contacting Stripe.",
+                  "pm.test('status is 409 Conflict', function () {",
+                  "  pm.response.to.have.status(409);",
+                  "});",
+                  "",
+                  "pm.test('says the cart has changed', function () {",
+                  "  pm.expect(pm.response.json().error).to.equal('Your cart has changed. Please check the new total.');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"shipping_address\": {\n    \"line_1\": \"10 Downing Street\",\n    \"city\": \"London\",\n    \"postal_code\": \"SW1A 2AA\",\n    \"country_code\": \"GB\"\n  },\n  \"payment_method_id\": \"pm_card_visa\",\n  \"expected_total\": \"17.00\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/cart/checkout",
+            "description": "POST /cart/checkout with an expected_total that doesn't match the cart. Expects 409, and nothing is charged."
           }
         },
         {
@@ -1261,8 +1323,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// 4000 0000 0000 0002 is the test card the fake payment processor always",
-                  "// declines (copying Stripe's test cards).",
+                  "// pm_card_visa_chargeDeclined is Stripe's test card that is always declined.",
                   "// 402 Payment Required: the request was fine, but the payment failed.",
                   "pm.test('status is 402 Payment Required', function () {",
                   "  pm.response.to.have.status(402);",
@@ -1282,11 +1343,47 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"shipping_address\": {\n    \"line_1\": \"10 Downing Street\",\n    \"city\": \"London\",\n    \"postal_code\": \"SW1A 2AA\",\n    \"country_code\": \"GB\"\n  },\n  \"payment\": {\n    \"cardholder_name\": \"E2E Shopper\",\n    \"card_number\": \"4000 0000 0000 0002\",\n    \"expiry_month\": 12,\n    \"expiry_year\": 2099,\n    \"cvc\": \"123\"\n  }\n}",
+              "raw": "{\n  \"shipping_address\": {\n    \"line_1\": \"10 Downing Street\",\n    \"city\": \"London\",\n    \"postal_code\": \"SW1A 2AA\",\n    \"country_code\": \"GB\"\n  },\n  \"payment_method_id\": \"pm_card_visa_chargeDeclined\",\n  \"expected_total\": \"{{orderTotal}}\"\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/cart/checkout",
-            "description": "POST /cart/checkout with the always-declined test card. Expects 402, and no order is created."
+            "description": "POST /cart/checkout with Stripe's always-declined test card. Expects 402, and no order is created."
+          }
+        },
+        {
+          "name": "Check out with a card needing 3-D Secure (refused)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// pm_card_threeDSecure2Required is Stripe's test card whose bank always",
+                  "// asks for an extra check (3-D Secure). The shop doesn't support that, so",
+                  "// the card is turned away with a friendly message instead.",
+                  "pm.test('status is 402 Payment Required', function () {",
+                  "  pm.response.to.have.status(402);",
+                  "});",
+                  "",
+                  "pm.test('asks for a different card', function () {",
+                  "  pm.expect(pm.response.json().error).to.equal(\"This card needs extra verification, which isn't supported. Please use a different card.\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"shipping_address\": {\n    \"line_1\": \"10 Downing Street\",\n    \"city\": \"London\",\n    \"postal_code\": \"SW1A 2AA\",\n    \"country_code\": \"GB\"\n  },\n  \"payment_method_id\": \"pm_card_threeDSecure2Required\",\n  \"expected_total\": \"{{orderTotal}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/cart/checkout",
+            "description": "POST /cart/checkout with Stripe's 3-D Secure test card. Expects 402, and no order is created."
           }
         },
         {
@@ -1303,10 +1400,11 @@
                   "",
                   "// A failed payment undoes everything, so the cart is exactly as it was",
                   "// and the customer can simply try another card.",
-                  "pm.test('the cart still holds the 2 items, totalling 17.00', function () {",
+                  "pm.test('the cart still holds the 2 items, totalling 17.00 (20.95 with delivery)', function () {",
                   "  const cart = pm.response.json();",
                   "  pm.expect(cart.items[0].quantity).to.equal(2);",
                   "  pm.expect(cart.total).to.equal('17.00');",
+                  "  pm.expect(cart.order_total).to.equal('20.95');",
                   "});"
                 ]
               }
@@ -1327,16 +1425,20 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// 4242 4242 4242 4242 is the test card that always succeeds.",
+                  "// pm_card_visa is Stripe's test card that always succeeds. The money is",
+                  "// held, the order written, then the money taken.",
                   "// 201 Created: the payment went through and an order was created.",
                   "pm.test('status is 201 Created', function () {",
                   "  pm.response.to.have.status(201);",
                   "});",
                   "",
-                  "pm.test('returns a paid order for 17.00', function () {",
+                  "// Hand-checked: 17.00 of items + 3.95 delivery = 20.95.",
+                  "pm.test('returns a paid order for 20.95, including 3.95 delivery', function () {",
                   "  const order = pm.response.json();",
                   "  pm.expect(order.status).to.equal('paid');",
-                  "  pm.expect(order.total_amount).to.equal('17.00');",
+                  "  pm.expect(order.total_amount).to.equal('20.95');",
+                  "  pm.expect(order.delivery_charge).to.equal('3.95');",
+                  "  pm.expect(order.items_total).to.equal('17.00');",
                   "",
                   "  // Save the order for the order-history requests below: its id, and the",
                   "  // whole order as text (collection variables can only hold strings, so",
@@ -1362,9 +1464,11 @@
                   "  pm.expect(address.country_code).to.equal('GB');",
                   "});",
                   "",
-                  "// Card details must never be sent back. pm.response.text() is the raw body.",
-                  "pm.test('never sends the card number back', function () {",
-                  "  pm.expect(pm.response.text()).to.not.include('4242');",
+                  "// Payment details must never be sent back. pm.response.text() is the raw",
+                  "// body: neither the PaymentMethod (pm_) nor Stripe's payment id (pi_).",
+                  "pm.test('never sends the payment details back', function () {",
+                  "  pm.expect(pm.response.text()).to.not.include('pm_');",
+                  "  pm.expect(pm.response.text()).to.not.include('pi_');",
                   "});"
                 ]
               }
@@ -1377,11 +1481,11 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"shipping_address\": {\n    \"line_1\": \"10 Downing Street\",\n    \"city\": \"London\",\n    \"postal_code\": \"SW1A 2AA\",\n    \"country_code\": \"GB\"\n  },\n  \"payment\": {\n    \"cardholder_name\": \"E2E Shopper\",\n    \"card_number\": \"4242 4242 4242 4242\",\n    \"expiry_month\": 12,\n    \"expiry_year\": 2099,\n    \"cvc\": \"123\"\n  }\n}",
+              "raw": "{\n  \"shipping_address\": {\n    \"line_1\": \"10 Downing Street\",\n    \"city\": \"London\",\n    \"postal_code\": \"SW1A 2AA\",\n    \"country_code\": \"GB\"\n  },\n  \"payment_method_id\": \"pm_card_visa\",\n  \"expected_total\": \"{{orderTotal}}\"\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/cart/checkout",
-            "description": "POST /cart/checkout with the always-succeeds test card. Expects 201 with a paid order. line_2 and region are optional, so they're left out of the address."
+            "description": "POST /cart/checkout with Stripe's always-succeeds test card and the total the cart showed. Expects 201 with a paid order. line_2 and region are optional, so they're left out of the address."
           }
         },
         {
@@ -1397,8 +1501,14 @@
                   "});",
                   "",
                   "// A successful checkout empties the cart.",
-                  "pm.test('the cart is empty', function () {",
-                  "  pm.expect(pm.response.json()).to.deep.equal({ items: [], total: '0.00' });",
+                  "pm.test('the cart is empty, with nothing to pay', function () {",
+                  "  pm.expect(pm.response.json()).to.deep.equal({",
+                  "    items: [],",
+                  "    total: '0.00',",
+                  "    delivery_charge: '0.00',",
+                  "    order_total: '0.00',",
+                  "    free_delivery_remaining: '0.00'",
+                  "  });",
                   "});"
                 ]
               }
@@ -1460,10 +1570,10 @@
                   "",
                   "// Each order in the history is a short summary. item_count adds up the",
                   "// quantities: 2 mugs = 2 items.",
-                  "pm.test('summarises the order: paid, 17.00, 2 items', function () {",
+                  "pm.test('summarises the order: paid, 20.95 (with delivery), 2 items', function () {",
                   "  const summary = pm.response.json()[0];",
                   "  pm.expect(summary.status).to.equal('paid');",
-                  "  pm.expect(summary.total_amount).to.equal('17.00');",
+                  "  pm.expect(summary.total_amount).to.equal('20.95');",
                   "  pm.expect(summary.item_count).to.equal(2);",
                   "  pm.expect(summary.created_at).to.be.a('string');",
                   "});"
@@ -1587,7 +1697,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"shipping_address\": {\n    \"line_1\": \"10 Downing Street\",\n    \"city\": \"London\",\n    \"postal_code\": \"SW1A 2AA\",\n    \"country_code\": \"GB\"\n  },\n  \"payment\": {\n    \"cardholder_name\": \"E2E Shopper\",\n    \"card_number\": \"4242 4242 4242 4242\",\n    \"expiry_month\": 12,\n    \"expiry_year\": 2099,\n    \"cvc\": \"123\"\n  }\n}",
+              "raw": "{\n  \"shipping_address\": {\n    \"line_1\": \"10 Downing Street\",\n    \"city\": \"London\",\n    \"postal_code\": \"SW1A 2AA\",\n    \"country_code\": \"GB\"\n  },\n  \"payment_method_id\": \"pm_card_visa\",\n  \"expected_total\": \"20.95\"\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/cart/checkout",
@@ -1621,7 +1731,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"shipping_address\": {\n    \"line_1\": \"10 Downing Street\",\n    \"city\": \"London\",\n    \"postal_code\": \"SW1A 2AA\",\n    \"country_code\": \"GB\"\n  },\n  \"payment\": {\n    \"cardholder_name\": \"E2E Shopper\",\n    \"card_number\": \"4242 4242 4242 4242\",\n    \"expiry_month\": 12,\n    \"expiry_year\": 2099,\n    \"cvc\": \"123\"\n  }\n}",
+              "raw": "{\n  \"shipping_address\": {\n    \"line_1\": \"10 Downing Street\",\n    \"city\": \"London\",\n    \"postal_code\": \"SW1A 2AA\",\n    \"country_code\": \"GB\"\n  },\n  \"payment_method_id\": \"pm_card_visa\",\n  \"expected_total\": \"20.95\"\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/cart/checkout",

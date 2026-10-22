@@ -249,7 +249,15 @@ CREATE TABLE orders (
   customer_id         integer       NOT NULL REFERENCES customers (id) ON DELETE RESTRICT,
   shipping_address_id integer       NOT NULL REFERENCES addresses (id) ON DELETE RESTRICT,
   status              order_status  NOT NULL DEFAULT 'pending',
+  -- What the customer paid in total: the items plus delivery.
   total_amount        numeric(10,2) NOT NULL CHECK (total_amount >= 0),
+  -- What they paid for delivery: £3.95, or 0 when it was free (see
+  -- services/delivery.js). DEFAULT 0 covers orders from before delivery existed.
+  delivery_charge     numeric(10,2) NOT NULL DEFAULT 0 CHECK (delivery_charge >= 0),
+  -- Stripe's id for the order's payment (a PaymentIntent id, 'pi_...'), linking
+  -- the order to the Stripe dashboard. NULL for orders from before Stripe.
+  -- Never holds card details.
+  payment_reference   varchar(255),
   created_at          timestamptz   NOT NULL DEFAULT now(),
   updated_at          timestamptz   NOT NULL DEFAULT now()
 );
